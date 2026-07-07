@@ -217,19 +217,15 @@ def run_process(
 
 
 def compile_java_batch_runner(args: argparse.Namespace, java_root: Path, out_dir: Path) -> Optional[Path]:
-    if args.java_runner == "process":
+    if args.java_runner != "batch":
         return None
     javac = shutil.which(args.javac)
     if not javac:
-        if args.java_runner == "batch":
-            raise FileNotFoundError("javac was not found; use --java-runner process or install a JDK.")
-        return None
+        raise FileNotFoundError("javac was not found; use --java-runner native or --java-runner process.")
 
     source = java_root / "CppkhJavaKhBatchRunner.java"
     if not source.exists():
-        if args.java_runner == "batch":
-            raise FileNotFoundError(f"batch runner source not found: {source}")
-        return None
+        raise FileNotFoundError(f"batch runner source not found: {source}")
 
     classes_dir = out_dir / "java-helper-classes"
     classes_dir.mkdir(parents=True, exist_ok=True)
@@ -249,9 +245,7 @@ def compile_java_batch_runner(args: argparse.Namespace, java_root: Path, out_dir
     ]
     proc = subprocess.run(command, cwd=str(java_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        if args.java_runner == "batch":
-            raise RuntimeError(f"javac failed:\n{proc.stdout}\n{proc.stderr}")
-        return None
+        raise RuntimeError(f"javac failed:\n{proc.stdout}\n{proc.stderr}")
     return classes_dir
 
 
@@ -284,6 +278,33 @@ def run_java(args: argparse.Namespace, java_root: Path, pd_file: Path, out_dir: 
     if java_work.exists() and not args.keep_work:
         shutil.rmtree(java_work)
     java_work.mkdir(parents=True, exist_ok=True)
+
+    if args.java_runner in ("auto", "native"):
+        command = [
+            args.java,
+            f"-Xmx{args.java_xmx}",
+            "-cp",
+            java_classpath(java_root),
+            "org.katlas.JavaKh.JavaKh",
+            "-f",
+            str(pd_file),
+        ]
+        seconds, code, results = run_process(
+            "JavaKh",
+            command,
+            java_work,
+            out_dir / "javakh.out",
+            out_dir / "javakh.err",
+            args.timeout_sec,
+        )
+        return {
+            "name": "javakh",
+            "seconds": seconds,
+            "exit_code": code,
+            "results": results,
+            "command": command,
+            "runner": "native",
+        }
 
     helper_dir = compile_java_batch_runner(args, java_root, out_dir)
     if helper_dir is not None:
@@ -423,9 +444,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--java-xmx", default="4g", help="Java maximum heap, for example 4g or 16384m.")
     parser.add_argument(
         "--java-runner",
-        choices=["auto", "batch", "process"],
+        choices=["auto", "native", "batch", "process"],
         default="auto",
-        help="auto/batch runs many PDs in one JVM; process starts Java once per PD.",
+        help="auto/native runs the patched JavaKh multiline reader; batch uses the helper; process starts Java once per PD.",
     )
     parser.add_argument("--java-keep-cache", action="store_true", help="Do not delete JavaKh's work cache between PDs.")
     parser.add_argument("--out-dir", default=str(REPO_ROOT / "benchmark" / "kh-test"), help="Output directory.")

@@ -47,10 +47,6 @@ def normalize_pd_code(pd_code: PdInput) -> str:
         body = pd_code.strip()
         if ":" in body:
             body = body.split(":", 1)[1].strip()
-        elif "|" in body:
-            if body.startswith("[") and body.endswith("]"):
-                body = body[1:-1].strip()
-            body = body.split("|", 1)[1].strip()
 
         if body.replace(" ", "") == "PD[]":
             return "PD[]"

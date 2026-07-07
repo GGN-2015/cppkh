@@ -41,7 +41,7 @@ PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]
 - Python 3.
 - A built `cppkh` executable, or pass `--build-cpp`.
 - A Java runtime available as `java`.
-- A JDK with `javac` is recommended for the fast Java batch runner.
+- A JDK with `javac` is only needed for `--java-runner batch`.
 - For default preprocessing, install the external simplifiers:
 
 ```sh
@@ -64,7 +64,7 @@ The runner prints stage timings:
 ```text
 prepared  : 10 cases in 0.018s
 cppkh     : 0.012s, exit=0, results=10
-JavaKh    : 0.812s, exit=0, results=10, runner=batch
+JavaKh    : 0.812s, exit=0, results=10, runner=native
 compare: OK
 ```
 
@@ -95,7 +95,7 @@ python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark
 --java COMMAND            Java command, default: java.
 --javac COMMAND           javac command for the batch runner.
 --java-xmx SIZE           Java heap, default: 4g.
---java-runner MODE        auto, batch, or process.
+--java-runner MODE        auto, native, batch, or process.
 --java-keep-cache         Keep JavaKh's cache between PD codes.
 --limit N                 Run at most N cases.
 --start N                 Start at 1-based case N.
@@ -108,11 +108,20 @@ python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark
 
 ## Java Runner Modes
 
-`--java-runner auto` is the default. It compiles
-`reference/javakh/CppkhJavaKhBatchRunner.java` into the output directory when
-`javac` is available. The helper calls the original JavaKh entry point for each
-PD code inside one JVM, using a fresh class loader and clearing JavaKh's work
-`cache/` by default.
+`--java-runner auto` is the default. It uses the patched bundled JavaKh entry
+point directly:
+
+```sh
+java -cp reference/javakh org.katlas.JavaKh.JavaKh -f prepared.pd
+```
+
+That patched entry point reads one PD code per non-empty line, clears JavaKh's
+work `cache/` between PD codes by default, and prints a single-line `ERROR`
+record for any PD code that fails without stopping later cases.
+
+Use `--java-runner batch` to compile and run
+`reference/javakh/CppkhJavaKhBatchRunner.java`. This mode is kept for comparing
+against the older helper path and requires `javac`.
 
 Use `--java-runner process` when you want the most isolated behavior. It starts
 a new Java process for every PD code, which is much slower.
