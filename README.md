@@ -66,6 +66,7 @@ copied beside it.
 - [Command-line options](docs/CLI_OPTIONS.md)
 - [Python ctypes interface](docs/PYTHON_CTYPES.md)
 - [Testing against JavaKh](docs/TEST.md)
+- [Bundled JavaKh reference](docs/JAVAKH_REFERENCE.md)
 - [Benchmark results](docs/BENCHMARKS.md)
 
 ## References

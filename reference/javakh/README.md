@@ -3,6 +3,8 @@
 This directory contains the bundled JavaKh class-file runtime used as the
 reference implementation for cross-checking `cppkh`.
 
+The user-facing usage guide is in `../../docs/JAVAKH_REFERENCE.md`.
+
 Included runtime pieces:
 
 - `org/katlas/JavaKh/**/*.class`

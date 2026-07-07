@@ -4,6 +4,8 @@
 test runner. It compares `cppkh` against the bundled JavaKh reference runtime
 in `reference/javakh/`.
 
+See [Bundled JavaKh Reference](JAVAKH_REFERENCE.md) for direct JavaKh usage.
+
 ## Data Format
 
 The default input is:
