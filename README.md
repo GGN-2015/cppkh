@@ -106,3 +106,22 @@ copied beside it.
 
 - Knot Atlas: [Planar Diagrams](https://katlas.org/wiki/Planar_Diagrams)
 - Knot Atlas: [Khovanov Homology](https://katlas.org/wiki/Khovanov_Homology)
+
+## Original JavaKh
+
+`cppkh` follows the integer JavaKh computation path. The original JavaKh-v2
+project is available at [geometer/JavaKh-v2](https://github.com/geometer/JavaKh-v2).
+
+## Citation
+
+If you use `cppkh` in academic work, please cite this repository:
+
+```bibtex
+@software{cppkh_2026,
+  author  = {{GGN\_2015}},
+  title   = {{cppkh}: A C++ implementation of the JavaKh Khovanov homology computation path},
+  year    = {2026},
+  url     = {https://github.com/GGN-2015/cppkh},
+  version = {0.1.1}
+}
+```
