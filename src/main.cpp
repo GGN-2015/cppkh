@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <new>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -318,6 +320,11 @@ struct ProfileStats {
     ProfileCounter complexCompose;
     ProfileCounter complexReduce;
     ProfileCounter deLoop;
+    ProfileCounter deLoopSetup;
+    ProfileCounter deLoopPrev;
+    ProfileCounter deLoopNext;
+    ProfileCounter deLoopPrevTerms;
+    ProfileCounter deLoopNextTerms;
     ProfileCounter matrixReduce;
     ProfileCounter matrixCompose;
     ProfileCounter blockReduction;
@@ -394,6 +401,13 @@ static void printProfile() {
     appendProfileCounter(std::cerr, "complexCompose", g_profile.complexCompose);
     appendProfileCounter(std::cerr, "complexReduce", g_profile.complexReduce);
     appendProfileCounter(std::cerr, "deLoop", g_profile.deLoop);
+    appendProfileCounter(std::cerr, "deLoopSetup", g_profile.deLoopSetup);
+    appendProfileCounter(std::cerr, "deLoopPrev", g_profile.deLoopPrev);
+    appendProfileCounter(std::cerr, "deLoopNext", g_profile.deLoopNext);
+    std::cerr << " deLoopPrevTermCount=" << g_profile.deLoopPrevTerms.ns
+              << " deLoopPrevTermCalls=" << g_profile.deLoopPrevTerms.calls
+              << " deLoopNextTermCount=" << g_profile.deLoopNextTerms.ns
+              << " deLoopNextTermCalls=" << g_profile.deLoopNextTerms.calls;
     appendProfileCounter(std::cerr, "matrixReduce", g_profile.matrixReduce);
     appendProfileCounter(std::cerr, "matrixCompose", g_profile.matrixCompose);
     appendProfileCounter(std::cerr, "blockReduction", g_profile.blockReduction);
@@ -589,15 +603,109 @@ static uint64_t hashInt(uint64_t h, int v) {
     return hashMix(h, static_cast<uint64_t>(static_cast<int64_t>(v)));
 }
 
-template <typename T>
-static uint64_t hashIntVector(uint64_t h, const std::vector<T>& values) {
+template <typename T, typename Alloc>
+static uint64_t hashIntVector(uint64_t h, const std::vector<T, Alloc>& values) {
     h = hashMix(h, values.size());
     for (T v : values) h = hashInt(h, static_cast<int>(v));
     return h;
 }
 
 typedef int8_t Small;
-typedef std::vector<Small> SmallVec;
+
+class SmallArena {
+    struct Chunk {
+        std::unique_ptr<unsigned char[]> data;
+        size_t capacity = 0;
+        explicit Chunk(size_t n) : data(new unsigned char[n]), capacity(n) {}
+    };
+
+    static const size_t defaultChunkSize = 4u * 1024u * 1024u;
+    std::vector<Chunk> chunks;
+    size_t chunkIndex = 0;
+    size_t offset = 0;
+
+public:
+    void reset() {
+        chunkIndex = 0;
+        offset = 0;
+    }
+
+    void* allocate(size_t bytes, size_t alignment) {
+        if (bytes == 0) bytes = 1;
+        if (alignment == 0) alignment = 1;
+        while (true) {
+            if (chunkIndex >= chunks.size()) {
+                size_t capacity = std::max(defaultChunkSize, bytes + alignment);
+                chunks.push_back(Chunk(capacity));
+                offset = 0;
+            }
+            Chunk& chunk = chunks[chunkIndex];
+            uintptr_t base = reinterpret_cast<uintptr_t>(chunk.data.get());
+            uintptr_t ptr = base + offset;
+            uintptr_t aligned = (ptr + alignment - 1) & ~(static_cast<uintptr_t>(alignment) - 1);
+            size_t alignedOffset = static_cast<size_t>(aligned - base);
+            if (alignedOffset + bytes <= chunk.capacity) {
+                offset = alignedOffset + bytes;
+                return reinterpret_cast<void*>(aligned);
+            }
+            ++chunkIndex;
+            offset = 0;
+        }
+    }
+};
+
+static SmallArena g_smallArena;
+
+template <typename T>
+struct ArenaAllocator {
+    typedef T value_type;
+
+    ArenaAllocator() noexcept {}
+    template <typename U> ArenaAllocator(const ArenaAllocator<U>&) noexcept {}
+
+    T* allocate(std::size_t n) {
+        if (n > static_cast<std::size_t>(-1) / sizeof(T)) throw std::bad_alloc();
+        return static_cast<T*>(g_smallArena.allocate(n * sizeof(T), alignof(T)));
+    }
+
+    void deallocate(T*, std::size_t) noexcept {}
+
+    template <typename U>
+    struct rebind { typedef ArenaAllocator<U> other; };
+};
+
+template <typename T, typename U>
+static bool operator==(const ArenaAllocator<T>&, const ArenaAllocator<U>&) { return true; }
+
+template <typename T, typename U>
+static bool operator!=(const ArenaAllocator<T>&, const ArenaAllocator<U>&) { return false; }
+
+typedef std::vector<Small, ArenaAllocator<Small> > SmallVec;
+typedef std::vector<int, ArenaAllocator<int> > ArenaIntVec;
+
+template <size_t InlineN>
+struct IntBuffer {
+    size_t n = 0;
+    std::array<int, InlineN> inlineData;
+    std::vector<int> heapData;
+
+    explicit IntBuffer(size_t count = 0, int value = 0) : n(count) {
+        if (n <= InlineN) std::fill(inlineData.begin(), inlineData.begin() + static_cast<std::ptrdiff_t>(n), value);
+        else heapData.assign(n, value);
+    }
+
+    size_t size() const { return n; }
+
+    int& operator[](size_t i) {
+        return heapData.empty() ? inlineData[i] : heapData[i];
+    }
+
+    const int& operator[](size_t i) const {
+        return heapData.empty() ? inlineData[i] : heapData[i];
+    }
+};
+
+typedef IntBuffer<256> WorkInts;
 
 struct Cap;
 typedef std::shared_ptr<Cap> CapPtr;
@@ -765,8 +873,10 @@ struct Cobordism {
     mutable std::string keyCache;
     mutable bool hashReady = false;
     mutable uint64_t hashCache = 0;
-    mutable std::vector<SmallVec> boundaryComponents;
-    mutable std::vector<SmallVec> edges;
+    mutable ArenaIntVec boundaryOffset;
+    mutable SmallVec boundaryItems;
+    mutable ArenaIntVec edgeOffset;
+    mutable SmallVec edgeItems;
 
     Cobordism() = default;
     Cobordism(const CapPtr& t, const CapPtr& b) : top(t), bottom(b) {
@@ -808,15 +918,38 @@ struct Cobordism {
 
     void reverseMaps() const {
         if (mapsReady) return;
-        boundaryComponents.assign(ncc, SmallVec());
-        for (int i = 0; i < nbc; ++i) boundaryComponents[connectedComponent[i]].push_back(static_cast<Small>(i));
-        std::vector<int> nedges(offtop, 0);
-        for (int i = 0; i < n; ++i) ++nedges[component[i]];
-        edges.assign(offtop, SmallVec());
-        for (int i = 0; i < offtop; ++i) edges[i].reserve(nedges[i]);
-        for (int i = 0; i < n; ++i) edges[component[i]].push_back(static_cast<Small>(i));
+        boundaryOffset.assign(ncc + 1, 0);
+        for (int i = 0; i < nbc; ++i) ++boundaryOffset[connectedComponent[i] + 1];
+        for (int i = 1; i <= ncc; ++i) boundaryOffset[i] += boundaryOffset[i - 1];
+        boundaryItems.resize(nbc);
+        WorkInts boundaryCursor(ncc);
+        for (int i = 0; i < ncc; ++i) boundaryCursor[i] = boundaryOffset[i];
+        for (int i = 0; i < nbc; ++i) {
+            int cc = connectedComponent[i];
+            boundaryItems[boundaryCursor[cc]++] = static_cast<Small>(i);
+        }
+
+        edgeOffset.assign(offtop + 1, 0);
+        for (int i = 0; i < n; ++i) ++edgeOffset[component[i] + 1];
+        for (int i = 1; i <= offtop; ++i) edgeOffset[i] += edgeOffset[i - 1];
+        edgeItems.resize(n);
+        WorkInts edgeCursor(offtop);
+        for (int i = 0; i < offtop; ++i) edgeCursor[i] = edgeOffset[i];
+        for (int i = 0; i < n; ++i) {
+            int c = component[i];
+            edgeItems[edgeCursor[c]++] = static_cast<Small>(i);
+        }
         mapsReady = true;
     }
+
+    int boundaryBegin(int i) const { return boundaryOffset[i]; }
+    int boundaryEnd(int i) const { return boundaryOffset[i + 1]; }
+    int boundaryCount(int i) const { return boundaryOffset[i + 1] - boundaryOffset[i]; }
+    int boundaryAt(int pos) const { return boundaryItems[pos]; }
+    int edgeBegin(int i) const { return edgeOffset[i]; }
+    int edgeEnd(int i) const { return edgeOffset[i + 1]; }
+    int edgeCount(int i) const { return edgeOffset[i + 1] - edgeOffset[i]; }
+    int edgeAt(int pos) const { return edgeItems[pos]; }
 
     bool isIsomorphism() const {
         if (!top->equals(*bottom)) return false;
@@ -863,14 +996,23 @@ struct Cobordism {
         return hashCache;
     }
 
-    CobPtr composeVertical(const CobPtr& cc) const;
+    CobPtr composeVertical(const CobPtr& cc) const { return composeVerticalPtr(cc.get()); }
+    CobPtr composeVerticalPtr(const Cobordism* cc) const;
     CobPtr composeHorizontal(int start, const CobPtr& cc, int cstart, int nc) const;
 };
+
+template <typename... Args>
+static CobPtr makeCob(Args&&... args) {
+    return std::make_shared<Cobordism>(std::forward<Args>(args)...);
+}
 
 static SimpleMutex g_cobMutex;
 static std::unordered_map<uint64_t, std::vector<CobPtr> > g_cobCache;
 
 static CobPtr cacheCobNoLock(const CobPtr& cob) {
+#ifdef KH_DISABLE_COB_CACHE
+    return cob;
+#else
     uint64_t h = cob->hash();
     std::vector<CobPtr>& bucket = g_cobCache[h];
     for (size_t i = 0; i < bucket.size(); ++i) {
@@ -878,6 +1020,7 @@ static CobPtr cacheCobNoLock(const CobPtr& cob) {
     }
     bucket.push_back(cob);
     return cob;
+#endif
 }
 
 static CobPtr cacheCob(const CobPtr& cob) {
@@ -890,7 +1033,9 @@ static CobPtr cacheCob(const CobPtr& cob) {
 }
 
 static void flushCobCache() {
+#ifndef KH_DISABLE_COB_CACHE
     g_cobCache.clear();
+#endif
 }
 
 static std::vector<int> counting(int n) {
@@ -907,7 +1052,7 @@ static SmallVec countingSmall(int n) {
 
 static CobPtr isomorphism(const CapPtr& c) {
     if (c->ncycles != 0) throw std::runtime_error("cycles in cap not supported by isomorphism");
-    CobPtr ret = std::make_shared<Cobordism>(c, c);
+    CobPtr ret = makeCob(c, c);
     ret->ncc = ret->nbc;
     ret->connectedComponent = countingSmall(ret->nbc);
     ret->dots.assign(ret->ncc, 0);
@@ -915,36 +1060,37 @@ static CobPtr isomorphism(const CapPtr& c) {
     return cacheCob(ret);
 }
 
-static void mergeRet(SmallVec& retcc, std::vector<int>& mid, std::vector<int>& rdots, int from, int to) {
+template <typename MidBuffer, typename DotBuffer>
+static void mergeRet(SmallVec& retcc, MidBuffer& mid, DotBuffer& rdots, int from, int to) {
     if (from == to) return;
     for (size_t i = 0; i < retcc.size(); ++i) if (retcc[i] == from) retcc[i] = static_cast<Small>(to);
     for (size_t i = 0; i < mid.size(); ++i) if (mid[i] == from) mid[i] = to;
     if (from >= 0 && to >= 0) rdots[to] += rdots[from];
 }
 
-CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
+CobPtr Cobordism::composeVerticalPtr(const Cobordism* cc) const {
     KH_PROFILE(cobComposeVertical);
     if (!top->equals(*cc->bottom)) throw std::runtime_error("vertical cobordism source mismatch");
     reverseMaps();
     cc->reverseMaps();
-    CobPtr ret = std::make_shared<Cobordism>(cc->top, bottom);
+    CobPtr ret = makeCob(cc->top, bottom);
     ret->hpower = hpower + cc->hpower;
     ret->connectedComponent = countingSmall(ret->nbc);
-    std::vector<int> midConComp(top->ncycles);
+    WorkInts midConComp(top->ncycles);
     for (int i = 0; i < top->ncycles; ++i) midConComp[i] = -2 - i;
-    std::vector<int> rdots(ncc + cc->ncc + ret->nbc + top->ncycles + 4, 0);
-    std::vector<int> mdots(ncc + cc->ncc + ret->nbc + top->ncycles + 4, 0);
-    std::vector<int> udots(ncc + cc->ncc + ret->nbc + 4, 0);
-    std::vector<int> ugenus(ncc + cc->ncc + ret->nbc + 4, 0);
+    WorkInts rdots(ncc + cc->ncc + ret->nbc + top->ncycles + 4, 0);
+    WorkInts mdots(ncc + cc->ncc + ret->nbc + top->ncycles + 4, 0);
+    WorkInts udots(ncc + cc->ncc + ret->nbc + 4, 0);
+    WorkInts ugenus(ncc + cc->ncc + ret->nbc + 4, 0);
     int unconnected = 0;
 
     for (int i = 0; i < ncc; ++i) {
         int reti = -1;
-        for (size_t jj = 0; jj < boundaryComponents[i].size(); ++jj) {
-            int k = boundaryComponents[i][jj];
+        for (int jj = boundaryBegin(i); jj < boundaryEnd(i); ++jj) {
+            int k = boundaryAt(jj);
             if (k < offtop) {
-                for (size_t l = 0; l < edges[k].size(); ++l) {
-                    reti = ret->connectedComponent[ret->component[edges[k][l]]];
+                for (int l = edgeBegin(k); l < edgeEnd(k); ++l) {
+                    reti = ret->connectedComponent[ret->component[edgeAt(l)]];
                     if (reti >= 0) break;
                 }
             } else if (k < offbot) {
@@ -961,11 +1107,11 @@ CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
         } else if (reti >= 0) rdots[reti] += dots[i];
         else mdots[-2 - reti] += dots[i];
 
-        for (size_t jj = 0; jj < boundaryComponents[i].size(); ++jj) {
-            int bc = boundaryComponents[i][jj];
+        for (int jj = boundaryBegin(i); jj < boundaryEnd(i); ++jj) {
+            int bc = boundaryAt(jj);
             if (bc < offtop) {
-                for (size_t kk = 0; kk < edges[bc].size(); ++kk) {
-                    int test = ret->connectedComponent[ret->component[edges[bc][kk]]];
+                for (int kk = edgeBegin(bc); kk < edgeEnd(bc); ++kk) {
+                    int test = ret->connectedComponent[ret->component[edgeAt(kk)]];
                     if (test != reti) mergeRet(ret->connectedComponent, midConComp, rdots, test, reti);
                 }
             } else if (bc < offbot) {
@@ -986,11 +1132,11 @@ CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
 
     for (int i = 0; i < cc->ncc; ++i) {
         int reti = -1;
-        for (size_t jj = 0; jj < cc->boundaryComponents[i].size(); ++jj) {
-            int k = cc->boundaryComponents[i][jj];
+        for (int jj = cc->boundaryBegin(i); jj < cc->boundaryEnd(i); ++jj) {
+            int k = cc->boundaryAt(jj);
             if (k < cc->offtop) {
-                for (size_t l = 0; l < cc->edges[k].size(); ++l) {
-                    reti = ret->connectedComponent[ret->component[cc->edges[k][l]]];
+                for (int l = cc->edgeBegin(k); l < cc->edgeEnd(k); ++l) {
+                    reti = ret->connectedComponent[ret->component[cc->edgeAt(l)]];
                     if (reti >= 0) break;
                 }
             } else if (k < cc->offbot) {
@@ -1007,11 +1153,11 @@ CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
         } else if (reti >= 0) rdots[reti] += cc->dots[i];
         else mdots[-2 - reti] += cc->dots[i];
 
-        for (size_t jj = 0; jj < cc->boundaryComponents[i].size(); ++jj) {
-            int bc = cc->boundaryComponents[i][jj];
+        for (int jj = cc->boundaryBegin(i); jj < cc->boundaryEnd(i); ++jj) {
+            int bc = cc->boundaryAt(jj);
             if (bc < cc->offtop) {
-                for (size_t kk = 0; kk < cc->edges[bc].size(); ++kk) {
-                    int test = ret->connectedComponent[ret->component[cc->edges[bc][kk]]];
+                for (int kk = cc->edgeBegin(bc); kk < cc->edgeEnd(bc); ++kk) {
+                    int test = ret->connectedComponent[ret->component[cc->edgeAt(kk)]];
                     if (test != reti) mergeRet(ret->connectedComponent, midConComp, rdots, test, reti);
                 }
             } else if (bc < cc->offbot) {
@@ -1050,25 +1196,26 @@ CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
     }
 
     ret->reverseMaps();
-    std::vector<int> rgenus(ret->ncc, 0);
+    WorkInts rgenus(ret->ncc, 0);
     for (int i = 0; i < ret->ncc; ++i) {
-        int b = static_cast<int>(ret->boundaryComponents[i].size());
+        int b = ret->boundaryCount(i);
         int x = 0;
         for (int j = 0; j < ncc; ++j) {
             bool used = false;
-            for (size_t kk = 0; kk < boundaryComponents[j].size() && !used; ++kk) {
-                int bc = boundaryComponents[j][kk];
+            for (int kk = boundaryBegin(j); kk < boundaryEnd(j) && !used; ++kk) {
+                int bc = boundaryAt(kk);
                 if (bc < offtop) {
-                    for (size_t l = 0; l < edges[bc].size(); ++l)
-                        if (ret->connectedComponent[ret->component[edges[bc][l]]] == i) { used = true; break; }
+                    for (int l = edgeBegin(bc); l < edgeEnd(bc); ++l)
+                        if (ret->connectedComponent[ret->component[edgeAt(l)]] == i) { used = true; break; }
                 } else if (bc < offbot) used = midConComp[bc - offtop] == i;
                 else used = ret->connectedComponent[bc - offbot + ret->offbot] == i;
             }
             if (used) {
-                x += 2 - 2 * genus[j] - static_cast<int>(boundaryComponents[j].size());
+                x += 2 - 2 * genus[j] - boundaryCount(j);
                 int njoins = 0;
-                for (size_t l = 0; l < boundaryComponents[j].size(); ++l) {
-                    if (boundaryComponents[j][l] < offtop) njoins += static_cast<int>(edges[boundaryComponents[j][l]].size());
+                for (int l = boundaryBegin(j); l < boundaryEnd(j); ++l) {
+                    int bc = boundaryAt(l);
+                    if (bc < offtop) njoins += edgeCount(bc);
                     else break;
                 }
                 x -= njoins / 2;
@@ -1076,15 +1223,15 @@ CobPtr Cobordism::composeVertical(const CobPtr& cc) const {
         }
         for (int j = 0; j < cc->ncc; ++j) {
             bool used = false;
-            for (size_t kk = 0; kk < cc->boundaryComponents[j].size() && !used; ++kk) {
-                int bc = cc->boundaryComponents[j][kk];
+            for (int kk = cc->boundaryBegin(j); kk < cc->boundaryEnd(j) && !used; ++kk) {
+                int bc = cc->boundaryAt(kk);
                 if (bc < cc->offtop) {
-                    for (size_t l = 0; l < cc->edges[bc].size(); ++l)
-                        if (ret->connectedComponent[ret->component[cc->edges[bc][l]]] == i) { used = true; break; }
+                    for (int l = cc->edgeBegin(bc); l < cc->edgeEnd(bc); ++l)
+                        if (ret->connectedComponent[ret->component[cc->edgeAt(l)]] == i) { used = true; break; }
                 } else if (bc < cc->offbot) used = ret->connectedComponent[bc - cc->offtop + ret->offtop] == i;
                 else used = midConComp[bc - cc->offbot] == i;
             }
-            if (used) x += 2 - 2 * cc->genus[j] - static_cast<int>(cc->boundaryComponents[j].size());
+            if (used) x += 2 - 2 * cc->genus[j] - cc->boundaryCount(j);
         }
         int g = 2 - b - x;
         if (g % 2 != 0 || g < 0) throw std::runtime_error("invalid vertical genus");
@@ -1128,12 +1275,12 @@ CobPtr Cobordism::composeHorizontal(int start, const CobPtr& cc, int cstart, int
     std::vector<int> tjoins(nc), bjoins(nc);
     CapPtr rtop = top->compose(start, cc->top, cstart, nc, &tjoins);
     CapPtr rbot = bottom->compose(start, cc->bottom, cstart, nc, &bjoins);
-    CobPtr ret = std::make_shared<Cobordism>(rtop, rbot);
+    CobPtr ret = makeCob(rtop, rbot);
     ret->hpower = hpower + cc->hpower;
     ret->connectedComponent = countingSmall(ret->nbc);
-    std::vector<int> midConComp(nc);
+    WorkInts midConComp(nc);
     for (int i = 0; i < nc; ++i) midConComp[i] = -2 - i;
-    std::vector<int> rdots(ret->nbc + nc + 2, 0), mdots(nc, 0), udots(ncc + cc->ncc + 2, 0), ugenus(ncc + cc->ncc + 2, 0);
+    WorkInts rdots(ret->nbc + nc + 2, 0), mdots(nc, 0), udots(ncc + cc->ncc + 2, 0), ugenus(ncc + cc->ncc + 2, 0);
     int unconnected = 0;
 
     for (int i = 0; i < ncc; ++i) {
@@ -1265,7 +1412,7 @@ CobPtr Cobordism::composeHorizontal(int start, const CobPtr& cc, int cstart, int
         if (!found) break;
     }
 
-    std::vector<int> rgenus(ret->nbc + nc + 2, 0);
+    WorkInts rgenus(ret->nbc + nc + 2, 0);
     for (int i = 0; i < static_cast<int>(rgenus.size()); ++i) {
         int b = 0;
         for (int j = 0; j < ret->nbc; ++j) if (ret->connectedComponent[j] == i) ++b;
@@ -1346,8 +1493,61 @@ CobPtr Cobordism::composeHorizontal(int start, const CobPtr& cc, int cstart, int
     return cacheCob(ret);
 }
 
+struct TermList {
+    typedef std::pair<CobPtr, BigInt> Term;
+    size_t n = 0;
+    Term first;
+    std::vector<Term, ArenaAllocator<Term> > rest;
+
+    bool empty() const { return n == 0; }
+    size_t size() const { return n; }
+    Term& front() { return first; }
+    const Term& front() const { return first; }
+
+    Term& operator[](size_t i) {
+        return i == 0 ? first : rest[i - 1];
+    }
+
+    const Term& operator[](size_t i) const {
+        return i == 0 ? first : rest[i - 1];
+    }
+
+    void reserve(size_t count) {
+        if (count > 1) rest.reserve(count - 1);
+    }
+
+    void push_back(const Term& term) {
+        if (n == 0) first = term;
+        else rest.push_back(term);
+        ++n;
+    }
+
+    void push_back(Term&& term) {
+        if (n == 0) first = std::move(term);
+        else rest.push_back(std::move(term));
+        ++n;
+    }
+
+    void eraseIndex(size_t i) {
+        if (i >= n) return;
+        if (n == 1) {
+            first = Term();
+            n = 0;
+            rest.clear();
+            return;
+        }
+        if (i == 0) {
+            first = std::move(rest.front());
+            rest.erase(rest.begin());
+        } else {
+            rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(i - 1));
+        }
+        --n;
+    }
+};
+
 struct LCCC {
-    std::vector<std::pair<CobPtr, BigInt> > terms;
+    TermList terms;
     bool alreadyReduced = false;
 
     LCCC() = default;
@@ -1365,7 +1565,7 @@ struct LCCC {
         for (size_t i = 0; i < terms.size(); ++i) {
             if (terms[i].first.get() == cc.get()) {
                 BigInt n = terms[i].second + c;
-                if (n.isZero()) terms.erase(terms.begin() + i);
+                if (n.isZero()) terms.eraseIndex(i);
                 else terms[i].second = n;
                 return;
             }
@@ -1374,7 +1574,7 @@ struct LCCC {
         for (size_t i = 0; i < terms.size(); ++i) {
             if (terms[i].first->hash() == hash && terms[i].first->equals(*cc)) {
                 BigInt n = terms[i].second + c;
-                if (n.isZero()) terms.erase(terms.begin() + i);
+                if (n.isZero()) terms.eraseIndex(i);
                 else terms[i].second = n;
                 return;
             }
@@ -1387,6 +1587,34 @@ struct LCCC {
         for (size_t i = 0; i < other.terms.size(); ++i) addTerm(other.terms[i].first, other.terms[i].second);
     }
 
+    static LCCC composeCobLeft(const Cobordism& left, const LCCC& other) {
+        LCCC ret;
+        if (other.isZero()) return ret;
+        if (other.terms.size() == 1) {
+            ret.terms.push_back(std::make_pair(left.composeVerticalPtr(other.terms[0].first.get()), other.terms[0].second));
+            return ret;
+        }
+        ret.terms.reserve(other.terms.size());
+        for (size_t i = 0; i < other.terms.size(); ++i) {
+            ret.addTerm(left.composeVerticalPtr(other.terms[i].first.get()), other.terms[i].second);
+        }
+        return ret;
+    }
+
+    static LCCC composeCobRight(const LCCC& left, const Cobordism& right) {
+        LCCC ret;
+        if (left.isZero()) return ret;
+        if (left.terms.size() == 1) {
+            ret.terms.push_back(std::make_pair(left.terms[0].first->composeVerticalPtr(&right), left.terms[0].second));
+            return ret;
+        }
+        ret.terms.reserve(left.terms.size());
+        for (size_t i = 0; i < left.terms.size(); ++i) {
+            ret.addTerm(left.terms[i].first->composeVerticalPtr(&right), left.terms[i].second);
+        }
+        return ret;
+    }
+
     LCCC multiplied(const BigInt& c) const {
         LCCC r;
         if (c.isZero()) return r;
@@ -1396,6 +1624,16 @@ struct LCCC {
         return r;
     }
 
+    void multiplyInPlace(const BigInt& c) {
+        if (c == BI_ONE) return;
+        alreadyReduced = false;
+        if (c == BI_MINUS_ONE) {
+            for (size_t i = 0; i < terms.size(); ++i) terms[i].second = -terms[i].second;
+        } else {
+            for (size_t i = 0; i < terms.size(); ++i) terms[i].second = coeffProduct(terms[i].second, c);
+        }
+    }
+
     LCCC composeVertical(const LCCC& other) const {
         KH_PROFILE(lcccComposeVertical);
         LCCC ret;
@@ -1403,14 +1641,14 @@ struct LCCC {
         if (terms.size() == 1 && other.terms.size() == 1) {
             BigInt coeff = coeffProduct(terms[0].second, other.terms[0].second);
             if (!coeff.isZero()) {
-                ret.terms.push_back(std::make_pair(terms[0].first->composeVertical(other.terms[0].first), coeff));
+                ret.terms.push_back(std::make_pair(terms[0].first->composeVerticalPtr(other.terms[0].first.get()), coeff));
             }
             return ret;
         }
         ret.terms.reserve(terms.size() * other.terms.size());
         for (size_t i = 0; i < terms.size(); ++i) {
             for (size_t j = 0; j < other.terms.size(); ++j) {
-                ret.addTerm(terms[i].first->composeVertical(other.terms[j].first), coeffProduct(terms[i].second, other.terms[j].second));
+                ret.addTerm(terms[i].first->composeVerticalPtr(other.terms[j].first.get()), coeffProduct(terms[i].second, other.terms[j].second));
             }
         }
         return ret;
@@ -1441,47 +1679,78 @@ struct LCCC {
         for (size_t ti = 0; ti < terms.size(); ++ti) {
             CobPtr cc = terms[ti].first;
             BigInt num = terms[ti].second;
+            bool canonical = cc->hpower == 0 && cc->ncc == cc->nbc;
+            if (canonical) {
+                for (int i = 0; i < cc->nbc; ++i) {
+                    if (cc->connectedComponent[i] != i || cc->genus[i] != 0 || cc->dots[i] > 1) {
+                        canonical = false;
+                        break;
+                    }
+                }
+                if (canonical) {
+                    if (ret.isZero()) ret.terms.push_back(std::make_pair(cc, num));
+                    else ret.addTerm(cc, num);
+                    continue;
+                }
+            }
             cc->reverseMaps();
             SmallVec dots(cc->nbc, 0);
             SmallVec genus(cc->nbc, 0);
-            std::vector<int> moreWork;
+            WorkInts moreWork(cc->ncc);
+            int moreWorkCount = 0;
             bool kill = false;
             for (int i = 0; i < cc->ncc; ++i) {
-                int bcCount = static_cast<int>(cc->boundaryComponents[i].size());
+                int bcCount = cc->boundaryCount(i);
                 if (cc->genus[i] + cc->dots[i] > 1) kill = true;
                 else if (bcCount == 0) {
                     if (cc->genus[i] == 1) num = num.mul_small(2);
                     else if (cc->dots[i] == 0) kill = true;
                 } else if (bcCount == 1) {
-                    dots[cc->boundaryComponents[i][0]] = static_cast<Small>(cc->dots[i] + cc->genus[i]);
+                    dots[cc->boundaryAt(cc->boundaryBegin(i))] = static_cast<Small>(cc->dots[i] + cc->genus[i]);
                     if (cc->genus[i] == 1) num = num.mul_small(2);
                 } else {
                     if (cc->genus[i] + cc->dots[i] == 1) {
                         if (cc->genus[i] == 1) num = num.mul_small(2);
-                        for (int b : cc->boundaryComponents[i]) dots[b] = 1;
+                        for (int p = cc->boundaryBegin(i); p < cc->boundaryEnd(i); ++p) dots[cc->boundaryAt(p)] = 1;
                     } else {
-                        moreWork.push_back(i);
+                        moreWork[moreWorkCount++] = i;
                     }
                 }
                 if (kill) break;
             }
             if (kill) continue;
-            std::vector<SmallVec> neckCutting(1, dots);
-            for (size_t wi = 0; wi < moreWork.size(); ++wi) {
+            SmallVec connected = countingSmall(cc->nbc);
+            if (moreWorkCount == 0) {
+                CobPtr newcc = makeCob(cc->top, cc->bottom);
+                newcc->connectedComponent = connected;
+                newcc->ncc = newcc->nbc;
+                newcc->genus = genus;
+                newcc->dots = dots;
+                CobPtr cached = cacheCob(newcc);
+                if (ret.isZero()) ret.terms.push_back(std::make_pair(cached, num));
+                else ret.addTerm(cached, num);
+                continue;
+            }
+            std::vector<SmallVec, ArenaAllocator<SmallVec> > neckCutting;
+            neckCutting.push_back(dots);
+            for (int wi = 0; wi < moreWorkCount; ++wi) {
                 int concomp = moreWork[wi];
-                int nbc = static_cast<int>(cc->boundaryComponents[concomp].size());
-                std::vector<SmallVec> next(neckCutting.size() * nbc, SmallVec(cc->nbc, 0));
+                int nbc = cc->boundaryCount(concomp);
+                std::vector<SmallVec, ArenaAllocator<SmallVec> > next;
+                next.reserve(neckCutting.size() * static_cast<size_t>(nbc));
                 for (size_t j = 0; j < neckCutting.size(); ++j) {
-                    next[j * nbc] = neckCutting[j];
-                    for (int k = 0; k < nbc; ++k) next[j * nbc][cc->boundaryComponents[concomp][k]] = 1;
-                    for (int k = 1; k < nbc; ++k) next[j * nbc + k] = next[j * nbc];
-                    for (int k = 0; k < nbc; ++k) next[j * nbc + k][cc->boundaryComponents[concomp][k]] = 0;
+                    SmallVec base = neckCutting[j];
+                    for (int p = cc->boundaryBegin(concomp); p < cc->boundaryEnd(concomp); ++p) base[cc->boundaryAt(p)] = 1;
+                    for (int k = 0; k < nbc; ++k) {
+                        SmallVec variant = base;
+                        variant[cc->boundaryAt(cc->boundaryBegin(concomp) + k)] = 0;
+                        next.push_back(std::move(variant));
+                    }
                 }
                 neckCutting.swap(next);
             }
-            SmallVec connected = countingSmall(cc->nbc);
             for (size_t i = 0; i < neckCutting.size(); ++i) {
-                CobPtr newcc = std::make_shared<Cobordism>(cc->top, cc->bottom);
+                CobPtr newcc = makeCob(cc->top, cc->bottom);
                 newcc->connectedComponent = connected;
                 newcc->ncc = newcc->nbc;
                 newcc->genus = genus;
@@ -1506,7 +1775,8 @@ struct SmoothingColumn {
     }
 };
 
-typedef std::vector<std::pair<int, LCCC> > MatrixRow;
+typedef std::pair<int, LCCC> MatrixEntry;
+typedef std::vector<MatrixEntry, ArenaAllocator<MatrixEntry> > MatrixRow;
 
 static MatrixRow::iterator findRowEntry(MatrixRow& row, int column) {
     return std::lower_bound(row.begin(), row.end(), column,
@@ -1540,6 +1810,23 @@ static void appendSortedRowEntry(MatrixRow& row, int column, const LCCC& lc) {
     if (lc.isZero()) return;
     if (row.empty() || row.back().first < column) row.push_back(std::make_pair(column, lc));
     else addRowEntry(row, column, lc);
+}
+
+static void appendSortedRowEntry(MatrixRow& row, int column, LCCC&& lc) {
+    if (lc.isZero()) return;
+    if (row.empty() || row.back().first < column) row.push_back(std::make_pair(column, std::move(lc)));
+    else addRowEntry(row, column, lc);
+}
+
+static void addRowEntry(MatrixRow& row, int column, LCCC&& lc) {
+    if (lc.isZero()) return;
+    MatrixRow::iterator it = findRowEntry(row, column);
+    if (it == row.end() || it->first != column) {
+        row.insert(it, std::make_pair(column, std::move(lc)));
+    } else {
+        it->second.add(lc);
+        if (it->second.isZero()) row.erase(it);
+    }
 }
 
 static void addSortedRow(MatrixRow& row, const MatrixRow& other) {
@@ -1605,7 +1892,7 @@ struct CobMatrix {
                     auto& cmrow = cm.entries[j];
                     for (auto& jk : cmrow) {
                         LCCC lc = ij.second.composeVertical(jk.second);
-                        if (!lc.isZero()) addRowEntry(result, jk.first, lc);
+                        if (!lc.isZero()) addRowEntry(result, jk.first, std::move(lc));
                     }
                 }
                 ret.entries[i].swap(result);
@@ -1626,6 +1913,14 @@ struct CobMatrix {
         auto work = [&](int begin, int end) {
             for (int j = begin; j < end; ++j) {
                 MatrixRow& row = entries[j];
+                bool allReduced = true;
+                for (size_t idx = 0; idx < row.size(); ++idx) {
+                    if (!row[idx].second.alreadyReduced) {
+                        allReduced = false;
+                        break;
+                    }
+                }
+                if (allReduced) continue;
                 MatrixRow reduced;
                 reduced.reserve(row.size());
                 for (size_t idx = 0; idx < row.size(); ++idx) {
@@ -1680,66 +1975,85 @@ struct CobMatrix {
     }
 
     CobMatrix extractColumns(const std::vector<int>& columns) {
-        std::vector<int> reverseSorted = columns;
-        std::sort(reverseSorted.begin(), reverseSorted.end());
-        std::reverse(reverseSorted.begin(), reverseSorted.end());
-        std::vector<int> reduced = columns;
+        int oldSourceN = source.n;
+        std::vector<int> selectedIndex(oldSourceN, -1);
+        std::vector<char> selected(oldSourceN, 0);
         for (size_t i = 0; i < columns.size(); ++i) {
-            int reducedColumn = columns[i];
-            for (size_t j = 0; j < i; ++j) if (columns[j] < columns[i]) --reducedColumn;
-            reduced[i] = reducedColumn;
+            selectedIndex[columns[i]] = static_cast<int>(i);
+            selected[columns[i]] = 1;
         }
+        std::vector<int> removedBefore(oldSourceN + 1, 0);
+        for (int c = 0; c < oldSourceN; ++c) removedBefore[c + 1] = removedBefore[c] + (selected[c] ? 1 : 0);
         SmoothingColumn sc(static_cast<int>(columns.size()));
         for (size_t i = 0; i < columns.size(); ++i) {
             sc.smoothings[i] = source.smoothings[columns[i]];
             sc.numbers[i] = source.numbers[columns[i]];
         }
-        for (int column : reverseSorted) {
-            source.numbers.erase(source.numbers.begin() + column);
-            source.smoothings.erase(source.smoothings.begin() + column);
+        std::vector<CapPtr> newSmoothings;
+        std::vector<int> newNumbers;
+        newSmoothings.reserve(oldSourceN - columns.size());
+        newNumbers.reserve(oldSourceN - columns.size());
+        for (int c = 0; c < oldSourceN; ++c) {
+            if (!selected[c]) {
+                newSmoothings.push_back(source.smoothings[c]);
+                newNumbers.push_back(source.numbers[c]);
+            }
         }
+        source.smoothings.swap(newSmoothings);
+        source.numbers.swap(newNumbers);
         source.n -= static_cast<int>(columns.size());
         CobMatrix result(sc, target);
         for (size_t r = 0; r < entries.size(); ++r) {
-            int outIndex = 0;
-            for (int reducedColumn : reduced) {
-                MatrixRow::iterator it = findRowEntry(entries[r], reducedColumn);
-                if (it != entries[r].end() && it->first == reducedColumn) {
-                    putRowEntry(result.entries[r], outIndex, it->second);
-                    entries[r].erase(it);
+            MatrixRow remaining;
+            remaining.reserve(entries[r].size());
+            for (size_t e = 0; e < entries[r].size(); ++e) {
+                int oldColumn = entries[r][e].first;
+                if (selected[oldColumn]) {
+                    putRowEntry(result.entries[r], selectedIndex[oldColumn], entries[r][e].second);
+                } else {
+                    entries[r][e].first = oldColumn - removedBefore[oldColumn];
+                    remaining.push_back(std::move(entries[r][e]));
                 }
-                decrementIndexesAbove(entries[r], reducedColumn);
-                ++outIndex;
             }
+            entries[r].swap(remaining);
         }
         return result;
     }
 
     CobMatrix extractRows(const std::vector<int>& rows) {
-        std::vector<int> reverseSorted = rows;
-        std::sort(reverseSorted.begin(), reverseSorted.end());
-        std::reverse(reverseSorted.begin(), reverseSorted.end());
-        std::vector<int> reduced = rows;
+        int oldTargetN = target.n;
+        std::vector<int> selectedIndex(oldTargetN, -1);
+        std::vector<char> selected(oldTargetN, 0);
         for (size_t i = 0; i < rows.size(); ++i) {
-            int reducedRow = rows[i];
-            for (size_t j = 0; j < i; ++j) if (rows[j] < rows[i]) --reducedRow;
-            reduced[i] = reducedRow;
+            selectedIndex[rows[i]] = static_cast<int>(i);
+            selected[rows[i]] = 1;
         }
         SmoothingColumn sc(static_cast<int>(rows.size()));
         for (size_t i = 0; i < rows.size(); ++i) {
             sc.smoothings[i] = target.smoothings[rows[i]];
             sc.numbers[i] = target.numbers[rows[i]];
         }
-        for (int row : reverseSorted) {
-            target.numbers.erase(target.numbers.begin() + row);
-            target.smoothings.erase(target.smoothings.begin() + row);
+        std::vector<CapPtr> newSmoothings;
+        std::vector<int> newNumbers;
+        newSmoothings.reserve(oldTargetN - rows.size());
+        newNumbers.reserve(oldTargetN - rows.size());
+        for (int r = 0; r < oldTargetN; ++r) {
+            if (!selected[r]) {
+                newSmoothings.push_back(target.smoothings[r]);
+                newNumbers.push_back(target.numbers[r]);
+            }
         }
+        target.smoothings.swap(newSmoothings);
+        target.numbers.swap(newNumbers);
         target.n -= static_cast<int>(rows.size());
         CobMatrix result(source, sc);
-        for (size_t i = 0; i < reduced.size(); ++i) {
-            result.entries[i] = entries[reduced[i]];
-            entries.erase(entries.begin() + reduced[i]);
+        std::vector<MatrixRow> remaining;
+        remaining.reserve(oldTargetN - rows.size());
+        for (int r = 0; r < oldTargetN; ++r) {
+            if (selected[r]) result.entries[selectedIndex[r]] = std::move(entries[r]);
+            else remaining.push_back(std::move(entries[r]));
         }
+        entries.swap(remaining);
         return result;
     }
 };
@@ -1949,7 +2263,7 @@ Komplex::Komplex(const std::vector<std::vector<int> >& pd, const std::vector<int
         if (i != 0) {
             for (size_t j = 0; j < pd.size(); ++j) if ((i & (1 << j)) != 0) {
                 int k = i ^ (1 << j);
-                CobPtr cc = std::make_shared<Cobordism>(smoothings[k], cp);
+                CobPtr cc = makeCob(smoothings[k], cp);
                 std::fill(cc->connectedComponent.begin(), cc->connectedComponent.end(), -1);
                 cc->ncc = 0;
                 for (size_t l = 0; l < pd.size(); ++l) {
@@ -2006,6 +2320,7 @@ Komplex::Komplex(const std::vector<std::vector<int> >& pd, const std::vector<int
 
 void Komplex::deLoop(int colnum) {
     KH_PROFILE(deLoop);
+    uint64_t deLoopSetupStart = g_options.profile ? profileNowNs() : 0;
     CobMatrix* prevMatrix = colnum != 0 ? &matrices[colnum - 1] : nullptr;
     CobMatrix* nextMatrix = colnum != ncolumns - 1 ? &matrices[colnum] : nullptr;
     int size = 0;
@@ -2014,17 +2329,34 @@ void Komplex::deLoop(int colnum) {
     CobMatrix prev, next;
     if (prevMatrix) prev = CobMatrix(columns[colnum - 1], newsc);
     if (nextMatrix) next = CobMatrix(newsc, columns[colnum + 1]);
-    std::vector<std::vector<std::pair<int, const LCCC*> > > nextByColumn;
+    std::vector<int> nextOffset;
+    std::vector<std::pair<int, const LCCC*> > nextColumnEntries;
     if (nextMatrix) {
-        nextByColumn.resize(columns[colnum].n);
+        nextOffset.assign(columns[colnum].n + 1, 0);
         for (size_t row = 0; row < nextMatrix->entries.size(); ++row) {
             for (size_t e = 0; e < nextMatrix->entries[row].size(); ++e) {
                 int col = nextMatrix->entries[row][e].first;
                 if (col >= 0 && col < columns[colnum].n) {
-                    nextByColumn[col].push_back(std::make_pair(static_cast<int>(row), &nextMatrix->entries[row][e].second));
+                    nextOffset[col + 1]++;
                 }
             }
         }
+        for (size_t col = 1; col < nextOffset.size(); ++col) nextOffset[col] += nextOffset[col - 1];
+        nextColumnEntries.resize(nextOffset.back());
+        std::vector<int> cursor = nextOffset;
+        for (size_t row = 0; row < nextMatrix->entries.size(); ++row) {
+            for (size_t e = 0; e < nextMatrix->entries[row].size(); ++e) {
+                int col = nextMatrix->entries[row][e].first;
+                if (col >= 0 && col < columns[colnum].n) {
+                    int pos = cursor[col]++;
+                    nextColumnEntries[pos] = std::make_pair(static_cast<int>(row), &nextMatrix->entries[row][e].second);
+                }
+            }
+        }
+    }
+    if (g_options.profile) {
+        g_profile.deLoopSetup.calls++;
+        g_profile.deLoopSetup.ns += profileNowNs() - deLoopSetupStart;
     }
     int newn = 0;
     for (int i = 0; i < columns[colnum].n; ++i) {
@@ -2060,33 +2392,47 @@ void Komplex::deLoop(int colnum) {
             newsc.smoothings[newn] = newsm;
             newsc.numbers[newn] = columns[colnum].numbers[i] + nmod;
             if (prevMatrix) {
+                uint64_t partStart = g_options.profile ? profileNowNs() : 0;
                 if (oldsm->ncycles != 0) {
-                    LCCC lc;
-                    lc.terms.push_back(std::make_pair(CobPtr(&prevcc, [](Cobordism*){}), BI_ONE));
                     MatrixRow row;
                     for (auto& kv : prevMatrix->entries[i]) {
-                        LCCC composition = lc.composeVertical(kv.second);
-                        appendSortedRowEntry(row, kv.first, composition);
+                        if (g_options.profile) {
+                            g_profile.deLoopPrevTerms.calls++;
+                            g_profile.deLoopPrevTerms.ns += kv.second.terms.size();
+                        }
+                        LCCC composition = LCCC::composeCobLeft(prevcc, kv.second);
+                        appendSortedRowEntry(row, kv.first, std::move(composition));
                     }
                     prev.entries[newn] = row;
                 } else {
                     prev.entries[newn] = prevMatrix->entries[i];
                 }
+                if (g_options.profile) {
+                    g_profile.deLoopPrev.calls++;
+                    g_profile.deLoopPrev.ns += profileNowNs() - partStart;
+                }
             }
             if (nextMatrix) {
+                uint64_t partStart = g_options.profile ? profileNowNs() : 0;
                 if (oldsm->ncycles != 0) {
-                    LCCC lc;
-                    lc.terms.push_back(std::make_pair(CobPtr(&nextcc, [](Cobordism*){}), BI_ONE));
-                    for (size_t idx = 0; idx < nextByColumn[i].size(); ++idx) {
-                        int k = nextByColumn[i][idx].first;
-                        LCCC composition = nextByColumn[i][idx].second->composeVertical(lc);
-                        appendSortedRowEntry(next.entries[k], newn, composition);
+                    for (int idx = nextOffset[i]; idx < nextOffset[i + 1]; ++idx) {
+                        int k = nextColumnEntries[idx].first;
+                        if (g_options.profile) {
+                            g_profile.deLoopNextTerms.calls++;
+                            g_profile.deLoopNextTerms.ns += nextColumnEntries[idx].second->terms.size();
+                        }
+                        LCCC composition = LCCC::composeCobRight(*nextColumnEntries[idx].second, nextcc);
+                        appendSortedRowEntry(next.entries[k], newn, std::move(composition));
                     }
                 } else {
-                    for (size_t idx = 0; idx < nextByColumn[i].size(); ++idx) {
-                        int k = nextByColumn[i][idx].first;
-                        appendSortedRowEntry(next.entries[k], newn, *nextByColumn[i][idx].second);
+                    for (int idx = nextOffset[i]; idx < nextOffset[i + 1]; ++idx) {
+                        int k = nextColumnEntries[idx].first;
+                        appendSortedRowEntry(next.entries[k], newn, *nextColumnEntries[idx].second);
                     }
+                }
+                if (g_options.profile) {
+                    g_profile.deLoopNext.calls++;
+                    g_profile.deLoopNext.ns += profileNowNs() - partStart;
                 }
             }
             newn++;
@@ -2134,19 +2480,17 @@ bool Komplex::reductionLemma(int i) {
 void Komplex::reductionLemma(int i, int j, int k, const BigInt& n) {
     CapPtr isoSource = columns[i].smoothings[k];
     CapPtr isoTarget = columns[i + 1].smoothings[j];
-    CobMatrix& m = matrices[i];
+    CobMatrix m = std::move(matrices[i]);
     CobMatrix delta = m.extractRow(j);
     delta.extractColumn(k);
     CobMatrix gamma = m.extractColumn(k);
-    CobMatrix phiinv(delta.target, gamma.source);
-    CobPtr phicc = std::make_shared<Cobordism>(isoTarget, isoSource);
-    phicc->connectedComponent = countingSmall(phicc->nbc);
-    phicc->ncc = phicc->nbc;
-    phicc->dots.assign(phicc->ncc, 0);
-    phicc->genus.assign(phicc->ncc, 0);
     BigInt coeff = (n == BI_ONE ? BI_MINUS_ONE : BI_ONE);
-    phiinv.putEntry(0, 0, LCCC(phicc, coeff));
-    CobMatrix gpd = gamma.compose(phiinv).compose(delta);
+    for (size_t row = 0; row < gamma.entries.size(); ++row) {
+        for (size_t e = 0; e < gamma.entries[row].size(); ++e) {
+            if (gamma.entries[row][e].first == 0) gamma.entries[row][e].second.multiplyInPlace(coeff);
+        }
+    }
+    CobMatrix gpd = gamma.compose(delta);
     gpd.add(m);
     matrices[i] = gpd;
     columns[i] = delta.source;
@@ -2161,23 +2505,25 @@ void Komplex::reductionLemma(int i, int j, int k, const BigInt& n) {
 
 std::vector<Komplex::Isomorphism> Komplex::findBlock(const CobMatrix& m) const {
     std::vector<Isomorphism> isos;
-    std::set<int> disallowedColumns;
-    std::set<int> isomorphismColumns;
+    std::vector<char> disallowedColumns(m.source.n, 0);
+    std::vector<char> isomorphismColumns(m.source.n, 0);
+    std::vector<int> potentialDisallowedColumns;
     for (int j = 0; j < static_cast<int>(m.entries.size()); ++j) {
         bool foundIsomorphismOnRow = false;
         bool rowForbidden = false;
         bool hasRowCandidate = false;
         Isomorphism rowCandidate;
-        std::set<int> potentialDisallowedColumns;
+        potentialDisallowedColumns.clear();
+        potentialDisallowedColumns.reserve(m.entries[j].size());
         for (const auto& kv : m.entries[j]) {
             int k = kv.first;
             const LCCC& lc = kv.second;
-            if (isomorphismColumns.count(k)) rowForbidden = true;
-            if (disallowedColumns.count(k)) continue;
+            if (isomorphismColumns[k]) rowForbidden = true;
+            if (disallowedColumns[k]) continue;
             if (foundIsomorphismOnRow) {
-                disallowedColumns.insert(k);
+                disallowedColumns[k] = 1;
             } else {
-                potentialDisallowedColumns.insert(k);
+                potentialDisallowedColumns.push_back(k);
                 if (!hasRowCandidate && lc.numberOfTerms() == 1) {
                     CobPtr cc = lc.firstTerm();
                     BigInt n = lc.firstCoefficient();
@@ -2191,8 +2537,10 @@ std::vector<Komplex::Isomorphism> Komplex::findBlock(const CobMatrix& m) const {
         }
         if (!rowForbidden && hasRowCandidate) {
             isos.push_back(rowCandidate);
-            isomorphismColumns.insert(rowCandidate.column);
-            disallowedColumns.insert(potentialDisallowedColumns.begin(), potentialDisallowedColumns.end());
+            isomorphismColumns[rowCandidate.column] = 1;
+            for (size_t p = 0; p < potentialDisallowedColumns.size(); ++p) {
+                disallowedColumns[potentialDisallowedColumns[p]] = 1;
+            }
         }
     }
     return isos;
@@ -2211,22 +2559,20 @@ void Komplex::blockReductionLemma(int i, const std::vector<Isomorphism>& block) 
         cols.push_back(iso.column);
         coeffs.push_back(iso.coefficient);
     }
-    CobMatrix m = matrices[i];
+    CobMatrix m = std::move(matrices[i]);
     CobMatrix delta = m.extractRows(rows);
     delta.extractColumns(cols);
     CobMatrix gamma = m.extractColumns(cols);
-    CobMatrix phiinv(delta.target, gamma.source);
     for (size_t k = 0; k < block.size(); ++k) {
-        CapPtr isoObject = gamma.source.smoothings[k];
-        CobPtr phicc = std::make_shared<Cobordism>(isoObject, isoObject);
-        phicc->connectedComponent = countingSmall(phicc->nbc);
-        phicc->ncc = phicc->nbc;
-        phicc->dots.assign(phicc->ncc, 0);
-        phicc->genus.assign(phicc->ncc, 0);
         BigInt coeff = (coeffs[k] == BI_ONE ? BI_MINUS_ONE : BI_ONE);
-        phiinv.putEntry(static_cast<int>(k), static_cast<int>(k), LCCC(phicc, coeff));
+        for (size_t row = 0; row < gamma.entries.size(); ++row) {
+            MatrixRow::iterator it = findRowEntry(gamma.entries[row], static_cast<int>(k));
+            if (it != gamma.entries[row].end() && it->first == static_cast<int>(k)) {
+                it->second.multiplyInPlace(coeff);
+            }
+        }
     }
-    CobMatrix gpd = gamma.compose(phiinv).compose(delta);
+    CobMatrix gpd = gamma.compose(delta);
     gpd.add(m);
     matrices[i] = gpd;
     columns[i] = delta.source;
@@ -2966,6 +3312,8 @@ static std::vector<std::string> listInputFiles(const std::string& dir) {
 }
 
 static std::string computePD(const std::vector<std::vector<int> >& pd) {
+    flushCobCache();
+    g_smallArena.reset();
     PDCode working = g_options.simplifyPD ? simplifyPDCode(pd) : pd;
     Komplex k = generateFast(working, getSigns(working));
     ProfileScope khScope(g_profile.kh);

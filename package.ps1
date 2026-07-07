@@ -96,9 +96,27 @@ Write-Host "Output   : $target"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $NoStrip) {
-    $strip = Get-Command strip -ErrorAction SilentlyContinue
-    if ($strip) {
-        & $strip.Source $target 2>$null
+    $stripCommand = ""
+    try {
+        $compilerPath = (Resolve-Path $Cxx -ErrorAction SilentlyContinue).Path
+        if (-not [string]::IsNullOrWhiteSpace($compilerPath)) {
+            $compilerStrip = Join-Path (Split-Path -Parent $compilerPath) ("strip" + $exeExt)
+            if (Test-Path $compilerStrip) { $stripCommand = $compilerStrip }
+        }
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($stripCommand)) {
+        $strip = Get-Command strip -ErrorAction SilentlyContinue
+        if ($strip) { $stripCommand = $strip.Source }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($stripCommand)) {
+        $oldPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $stripCommand $target *> $null
+        $stripExit = $LASTEXITCODE
+        $ErrorActionPreference = $oldPreference
+        if ($stripExit -ne 0) {
+            Write-Warning "strip failed; leaving the executable unstripped"
+        }
     }
 }
 

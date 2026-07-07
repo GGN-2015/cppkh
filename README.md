@@ -1,8 +1,7 @@
 # JavaKh C++ Port
 
 This is a standalone C++ port of the integer JavaKh computation path used by
-the bundled `org.katlas.JavaKh.JavaKh` classes. It does not call Java and does
-not require `PD.txt` in the working directory.
+the bundled `org.katlas.JavaKh.JavaKh` classes.
 
 ## Build
 
@@ -24,7 +23,7 @@ To install a standalone 64-bit GCC without touching system `PATH`:
 
 ```powershell
 .\tools\install_winlibs_gcc.ps1
-.\package.ps1 -Backend pthread -Static -Cxx ..\toolchains\winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64ucrt-14.0.0-r3\mingw64\bin\g++.exe -Out dist\win64-gcc16-static
+.\package.ps1 -Backend pthread -Static -NoLto -Cxx ..\toolchains\winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64ucrt-14.0.0-r3\mingw64\bin\g++.exe -Out dist\win64-gcc16-static
 ```
 
 The installer writes `..\toolchains\winlibs-gcc64.env.ps1`; dot-source that
@@ -85,7 +84,7 @@ another compiler with `--cxx` or the `CXX` environment variable.
 ```bat
 package.bat
 package.bat --backend win32 --cxx g++
-package.bat --backend pthread --static --cxx C:\msys64\mingw64\bin\g++.exe --out dist\win64
+package.bat --backend pthread --static --no-lto --cxx C:\msys64\mingw64\bin\g++.exe --out dist\win64
 ```
 
 PowerShell users can use the equivalent script:
@@ -203,6 +202,48 @@ python -m pip install pd-code-de-r1 pd-code-delete-nugatory
 
 When external simplification is enabled, the script passes `--no-simplify-pd`
 to cppkh so the PD code is simplified exactly once for both programs.
+
+Final local benchmark on Windows, 2026-07-07:
+
+- C++ compiler: WinLibs GCC 16.1.0 x86_64 UCRT POSIX SEH.
+- Java VM: Java HotSpot 64-Bit Server VM 21.0.5.
+- cppkh executable: `dist\win64-gcc16-static\javakh_cpp.exe`.
+- Build command:
+
+```powershell
+.\package.ps1 -Backend pthread -Static -NoLto `
+  -Cxx ..\toolchains\winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64ucrt-14.0.0-r3\mingw64\bin\g++.exe `
+  -Out dist\win64-gcc16-static
+```
+
+The Java side was fed the same externally simplified PD codes. The comparison
+below reports the core JavaKh computation time separately from the Python
+pre-simplification time.
+
+| Input set | Items | prepare_pdcode | cppkh | JavaKh-v2 | cppkh speedup | compare |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| First 1000 lines | 1000 | 1.560s | 4.300s | 7.035s | 1.636x | OK |
+| Last 1000 lines (`0006791` to `0007790`) | 1000 | 1.676s | 9.912s | 12.047s | 1.215x | OK |
+| Full `test_pdcode.txt` | 6614 | 9.787s | 37.980s | 43.229s | 1.138x | OK |
+
+Average milliseconds per PD code, lower is better:
+
+```text
+First 1000
+cppkh      | ############ 4.300 ms
+JavaKh-v2  | #################### 7.035 ms
+
+Last 1000
+cppkh      | ################ 9.912 ms
+JavaKh-v2  | #################### 12.047 ms
+
+Full 6614
+cppkh      | ################## 5.742 ms
+JavaKh-v2  | #################### 6.536 ms
+```
+
+For the full set, JavaKh-v2 plus external pre-simplification took `53.016s`
+(`8.016 ms/code`), while cppkh took `37.980s` (`5.742 ms/code`).
 
 For a single PD input, the quoted homology string is intended to match JavaKh's
 integer output byte-for-byte.
