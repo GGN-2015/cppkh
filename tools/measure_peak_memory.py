@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Measure peak RSS for cppkh and bundled JavaKh on a prepared PD file."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Sequence
+
+import psutil
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_JAVA_ROOT = REPO_ROOT / "reference" / "javakh"
+
+
+def java_classpath(java_root: Path) -> str:
+    jars = [
+        java_root / "jars" / "log4j-1.2.12.jar",
+        java_root / "jars" / "commons-io-1.2.jar",
+        java_root / "jars" / "commons-cli-1.0.jar",
+        java_root / "jars" / "commons-logging-1.1.jar",
+    ]
+    return os.pathsep.join(str(path) for path in [java_root] + jars)
+
+
+def process_tree_rss(proc: psutil.Process) -> int:
+    total = 0
+    processes = [proc]
+    try:
+        processes.extend(proc.children(recursive=True))
+    except psutil.Error:
+        pass
+    for item in processes:
+        try:
+            total += item.memory_info().rss
+        except psutil.Error:
+            pass
+    return total
+
+
+def measure(name: str, command: Sequence[str], cwd: Path, interval_sec: float) -> dict:
+    started = time.perf_counter()
+    proc = subprocess.Popen(
+        list(command),
+        cwd=str(cwd),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    root = psutil.Process(proc.pid)
+    peak_rss = 0
+    while proc.poll() is None:
+        peak_rss = max(peak_rss, process_tree_rss(root))
+        time.sleep(interval_sec)
+    peak_rss = max(peak_rss, process_tree_rss(root))
+    seconds = time.perf_counter() - started
+    return {
+        "name": name,
+        "seconds": seconds,
+        "exit_code": proc.returncode,
+        "peak_rss_bytes": peak_rss,
+        "peak_rss_mib": peak_rss / (1024 * 1024),
+        "command": list(command),
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prepared-pd", required=True, help="Already simplified PD file.")
+    parser.add_argument("--cpp-exe", required=True, help="Path to javakh_cpp executable.")
+    parser.add_argument("--java-root", default=str(DEFAULT_JAVA_ROOT), help="Bundled JavaKh directory.")
+    parser.add_argument("--java", default="java", help="Java executable.")
+    parser.add_argument("--java-xmx", default="4g", help="Java maximum heap.")
+    parser.add_argument("--threads", default="1", help="cppkh --threads value.")
+    parser.add_argument("--interval-sec", type=float, default=0.05, help="RSS polling interval.")
+    parser.add_argument("--out", default="", help="Optional JSON output path.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    prepared_pd = Path(args.prepared_pd).resolve()
+    cpp_exe = Path(args.cpp_exe).resolve()
+    java_root = Path(args.java_root).resolve()
+
+    cpp_command = [
+        str(cpp_exe),
+        "--pd-file",
+        str(prepared_pd),
+        "--quiet",
+        "--threads",
+        str(args.threads),
+        "--no-simplify-pd",
+    ]
+    java_command = [
+        args.java,
+        f"-Xmx{args.java_xmx}",
+        "-cp",
+        java_classpath(java_root),
+        "org.katlas.JavaKh.JavaKh",
+        "-f",
+        str(prepared_pd),
+    ]
+
+    java_work = REPO_ROOT / "benchmark" / "memory-java-work"
+    java_work.mkdir(parents=True, exist_ok=True)
+
+    result = {
+        "prepared_pd": str(prepared_pd),
+        "cppkh": measure("cppkh", cpp_command, REPO_ROOT, args.interval_sec),
+        "javakh": measure("javakh", java_command, java_work, args.interval_sec),
+    }
+    result["javakh_over_cpp_peak_rss_ratio"] = (
+        result["javakh"]["peak_rss_mib"] / result["cppkh"]["peak_rss_mib"]
+        if result["cppkh"]["peak_rss_mib"]
+        else None
+    )
+
+    text = json.dumps(result, indent=2)
+    print(text)
+    if args.out:
+        Path(args.out).resolve().write_text(text + "\n", encoding="utf-8")
+    return 0 if result["cppkh"]["exit_code"] == 0 and result["javakh"]["exit_code"] == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

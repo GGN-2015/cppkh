@@ -44,6 +44,8 @@ Machine-local benchmark on Windows, 2026-07-07:
 | Last 1000 lines | 1000 | 0.034s | 18.451s | 88.058s | 4.772x | OK |
 | Full `test_pdcode.txt` | 8397 | 0.200s | 62.971s | 467.016s | 7.416x | OK |
 
+![cppkh benchmark runtime and memory chart](assets/benchmark_runtime_memory.png)
+
 Average milliseconds per PD code, lower is better:
 
 ```text
@@ -71,4 +73,48 @@ javakh_results: 8397
 match: True
 mismatches: 0
 java_over_cpp_speed_ratio: 7.416
+```
+
+## Peak Memory
+
+Peak resident memory was measured separately on the same prepared full input
+with `tools/measure_peak_memory.py`. The measurement discards stdout/stderr and
+samples process-tree RSS with `psutil`, so it is intended to compare memory
+pressure rather than to validate output again.
+
+| Input set | Metric | cppkh | patched JavaKh | Java/C++ ratio |
+| --- | --- | ---: | ---: | ---: |
+| Full `test_pdcode.txt` | Peak RSS | 25.87 MiB | 483.36 MiB | 18.69x |
+
+The memory-measurement run completed successfully:
+
+```text
+cppkh_seconds: 64.054
+javakh_seconds: 444.427
+cppkh_peak_rss_mib: 25.867
+javakh_peak_rss_mib: 483.355
+javakh_over_cpp_peak_rss_ratio: 18.686
+```
+
+## Regenerating The Figure
+
+Install the plotting and memory-measurement helpers:
+
+```sh
+python -m pip install matplotlib psutil
+```
+
+Regenerate the chart:
+
+```sh
+python tools/plot_benchmarks.py
+```
+
+Rerun the peak-RSS measurement on an already prepared full PD file:
+
+```sh
+python tools/measure_peak_memory.py \
+  --prepared-pd benchmark/run-test-full8397/prepared.pd \
+  --cpp-exe benchmark/run-test-cpp/javakh_cpp.exe \
+  --out benchmark/full-memory.json
 ```

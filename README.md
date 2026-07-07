@@ -44,6 +44,19 @@ dist\windows\javakh_cpp.exe --pd-dir path\to\pdcode_directory
 
 R1-move removal and then nugatory-crossing removal are enabled by default.
 
+## Performance Snapshot
+
+On the full 8397-case benchmark, `cppkh` matched every bundled JavaKh result and
+finished in `62.971s` versus `467.016s` for the patched bundled JavaKh native
+multiline runner. That is a `7.416x` full-run speedup, or `7.499 ms/PD` for
+`cppkh` versus `55.617 ms/PD` for JavaKh.
+
+Peak RSS on the same prepared full input was `25.87 MiB` for `cppkh` and
+`483.36 MiB` for patched JavaKh, so the Java process used about `18.69x` more
+resident memory in this local run.
+
+![cppkh benchmark runtime and memory chart](docs/assets/benchmark_runtime_memory.png)
+
 ## Shared Library
 
 Build a shared library instead of an executable:
