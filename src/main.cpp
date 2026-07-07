@@ -3409,6 +3409,38 @@ CPPKH_API char* cppkh_compute_pd(const char* pd_code) {
     return cppkh_compute_pd_ex(pd_code, 1, 1);
 }
 
+CPPKH_API char* cppkh_compute_pd_batch_ex(const char* pd_codes, int simplify_pd, int reorder_crossings) {
+    try {
+        g_cppkhLastError.clear();
+        if (!pd_codes) throw std::runtime_error("pd_codes is null");
+        std::vector<std::pair<std::string, kh::PDCode> > parsed = kh::parsePDDocument(pd_codes, "ctypes-batch");
+        if (parsed.empty()) throw std::runtime_error("no PD code found");
+
+        CppkhOptionsGuard guard;
+        kh::g_options.progress = false;
+        kh::g_options.profile = false;
+        kh::g_options.simplifyPD = simplify_pd != 0;
+        kh::g_options.reorderCrossings = reorder_crossings != 0;
+
+        std::ostringstream out;
+        for (size_t i = 0; i < parsed.size(); ++i) {
+            if (i) out << "\n";
+            out << kh::computePD(parsed[i].second);
+        }
+        return cppkhDuplicateString(out.str());
+    } catch (const std::exception& e) {
+        g_cppkhLastError = e.what();
+        return nullptr;
+    } catch (...) {
+        g_cppkhLastError = "unknown error";
+        return nullptr;
+    }
+}
+
+CPPKH_API char* cppkh_compute_pd_batch(const char* pd_codes) {
+    return cppkh_compute_pd_batch_ex(pd_codes, 1, 1);
+}
+
 CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
     try {
         g_cppkhLastError.clear();

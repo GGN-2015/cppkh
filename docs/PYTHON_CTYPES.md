@@ -102,6 +102,8 @@ kh = CppKhLibrary("path/to/library")
 kh.version()
 kh.compute_pd(pd_code)
 kh.compute_pd(pd_code, simplify_pd=False, reorder_crossings=True)
+kh.compute_many_pd([pd_code, pd_code])
+kh.compute_many_pd([pd_code, pd_code], simplify_pd=False, reorder_crossings=True)
 kh.simplify_pd(pd_code)
 
 compute_pd(pd_code, "path/to/library")
@@ -120,6 +122,22 @@ compute_pd(pd_code, "path/to/library")
 
 The wrapper normalizes these forms with `normalize_pd_code()` before calling
 the C ABI, so the C++ library still receives a standard `PD[...]` string.
+
+For batch calls, pass a sequence of the same accepted single-code forms:
+
+```python
+from python.cppkh_ctypes import CppKhLibrary
+
+kh = CppKhLibrary("path/to/library")
+results = kh.compute_many_pd([
+    "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]",
+    [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]],
+])
+```
+
+The wrapper converts the sequence into one newline-separated PD document and
+passes it to `cppkh_compute_pd_batch_ex`, so the C++ side parses and computes
+the batch directly in one library call.
 
 `compute_pd` uses the same defaults as the CLI: R1 removal, nugatory-crossing
 removal, and crossing reordering are enabled.
@@ -141,6 +159,12 @@ import ctypes
 lib = ctypes.CDLL("dist/linux/libcppkh.so")
 lib.cppkh_compute_pd.argtypes = [ctypes.c_char_p]
 lib.cppkh_compute_pd.restype = ctypes.c_void_p
+lib.cppkh_compute_pd_batch_ex.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_int,
+    ctypes.c_int,
+]
+lib.cppkh_compute_pd_batch_ex.restype = ctypes.c_void_p
 lib.cppkh_last_error.argtypes = []
 lib.cppkh_last_error.restype = ctypes.c_char_p
 lib.cppkh_free.argtypes = [ctypes.c_void_p]
@@ -154,3 +178,7 @@ finally:
     if ptr:
         lib.cppkh_free(ptr)
 ```
+
+`cppkh_compute_pd_batch_ex(pd_document, simplify_pd, reorder_crossings)` returns
+one owned UTF-8 string containing newline-separated homology strings in input
+order.

@@ -11,8 +11,8 @@ using the C++ `cppkh` implementation.
 
 ## Key Design
 
-The package does not ship a prebuilt `.dll`, `.so`, or `.dylib`. Instead, the
-wheel and sdist include the C++ source file:
+The package does not ship a prebuilt `.dll`, `.so`, or `.dylib`. Instead, built
+wheel and sdist archives include the C++ source file:
 
 ```text
 cppkh_interface/data/src/main.cpp
@@ -21,6 +21,18 @@ cppkh_interface/data/src/main.cpp
 On first use, `cppkh-interface` calls `cpp-simple-interface` to compile that
 source into a local executable. The executable is cached and reused by later
 calls.
+
+The repository checkout does not keep that data-file copy under version
+control. During `poetry build` or `poetry publish --build`, a custom PEP 517
+backend copies the canonical source from:
+
+```text
+src/main.cpp
+```
+
+into the package data directory, builds the distribution, and then removes the
+temporary copy. Editable/development runs fall back to the repository-root
+`src/main.cpp` when the package data file is absent.
 
 ## Requirements
 
@@ -45,6 +57,10 @@ Linux / macOS example:
 ```sh
 export CXX=clang++
 ```
+
+Benchmark scripts in this repository may choose a faster 64-bit compiler for
+timing runs, but that compiler selection is intentionally outside the published
+Python package.
 
 ## Build
 
@@ -125,14 +141,50 @@ The arguments match the `javakh-interface` behavior:
 - `de_k8`: remove nugatory crossings after R1 removal.
 - `show_real_pdcode`: print the simplified PD code before computing.
 
+With the default `de_r1=True` and `de_k8=True`, the raw PD code is passed to the
+compiled C++ backend and cppkh performs R1 removal followed by nugatory-crossing
+removal. With both values set to `False`, the raw input is computed without
+those simplifications. Mixed values are still supported for single-code calls
+through Python preprocessing, matching the compatibility behavior of
+`javakh-interface`.
+
+## Batch API
+
+Use `solve_many_khovanov` or `compute_many_pd` to process many PD codes through
+one cached cppkh executable invocation:
+
+```python
+import cppkh_interface
+
+pd_codes = [
+    [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]],
+    "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]",
+]
+
+results = cppkh_interface.solve_many_khovanov(
+    pd_codes,
+    de_r1=True,
+    de_k8=True,
+    threads="1",
+)
+```
+
+The batch functions accept either a newline-separated PD document string or a
+sequence containing supported single PD-code inputs. For the high-throughput
+path, `de_r1` and `de_k8` must be equal: both `True` means the C++ backend does
+R1 then nugatory simplification; both `False` means no simplification. Mixed
+batch settings are rejected instead of silently falling back to slow per-item
+Python preprocessing.
+
 ## Additional API
 
 `cppkh-interface` also exposes a few C++-oriented helpers:
 
 ```python
-from cppkh_interface import compute_pd, simplify_pd, compile_cppkh
+from cppkh_interface import compute_pd, compute_many_pd, simplify_pd, compile_cppkh
 
 print(compute_pd("PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"))
+print(compute_many_pd(["PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"] * 10))
 print(simplify_pd([[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]))
 print(compile_cppkh())
 ```
@@ -175,23 +227,12 @@ Disable `-march=native` with:
 export CPPKH_INTERFACE_NATIVE=0
 ```
 
-## Syncing The C++ Source
+## Source Sync During Packaging
 
-The packaged C++ source is copied from the repository root:
+No manual source-copy step is required. The package build backend performs the
+temporary copy automatically before generating the wheel or sdist and cleans it
+afterward. The temporary path is intentionally ignored by Git:
 
 ```text
-src/main.cpp
-```
-
-Before publishing a new Python package after changing the C++ implementation,
-refresh the package copy:
-
-```powershell
-Copy-Item src\main.cpp python_project\cppkh-interface\cppkh_interface\data\src\main.cpp -Force
-```
-
-Linux / macOS:
-
-```sh
-cp src/main.cpp python_project/cppkh-interface/cppkh_interface/data/src/main.cpp
+python_project/cppkh-interface/cppkh_interface/data/src/main.cpp
 ```

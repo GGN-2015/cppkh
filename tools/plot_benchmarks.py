@@ -20,20 +20,23 @@ RUNTIME_ROWS = [
     {
         "label": "First 1000",
         "items": 1000,
-        "cppkh_seconds": 4.642398,
-        "javakh_seconds": 49.132353,
+        "cppkh_seconds": 4.293649,
+        "cppkh_interface_seconds": 4.041444,
+        "javakh_seconds": 47.483754,
     },
     {
         "label": "Last 1000",
         "items": 1000,
-        "cppkh_seconds": 18.451239,
-        "javakh_seconds": 88.057673,
+        "cppkh_seconds": 17.851301,
+        "cppkh_interface_seconds": 17.262348,
+        "javakh_seconds": 83.403080,
     },
     {
         "label": "Full 8397",
         "items": 8397,
-        "cppkh_seconds": 62.970849,
-        "javakh_seconds": 467.016071,
+        "cppkh_seconds": 61.595918,
+        "cppkh_interface_seconds": 61.392443,
+        "javakh_seconds": 466.562036,
     },
 ]
 
@@ -41,9 +44,17 @@ RUNTIME_ROWS = [
 # Filled from a full 8397-case process-memory run with
 # tools/measure_peak_memory.py. Values are peak RSS measurements in MiB.
 MEMORY_MIB = {
-    "cppkh_peak_rss": 25.8671875,
-    "javakh_peak_rss": 483.35546875,
+    "cppkh_peak_rss": 26.03515625,
+    "cppkh_interface_peak_rss": 68.078125,
+    "javakh_peak_rss": 453.5703125,
 }
+
+
+SERIES = [
+    ("cppkh", "cppkh_seconds", "#207567"),
+    ("cppkh-interface", "cppkh_interface_seconds", "#536d99"),
+    ("patched JavaKh", "javakh_seconds", "#b14a35"),
+]
 
 
 def annotate_bars(ax: plt.Axes, bars, suffix: str = "") -> None:
@@ -61,26 +72,27 @@ def annotate_bars(ax: plt.Axes, bars, suffix: str = "") -> None:
 
 def draw_runtime(ax: plt.Axes) -> None:
     labels = [row["label"] for row in RUNTIME_ROWS]
-    cpp = np.array([row["cppkh_seconds"] for row in RUNTIME_ROWS])
-    java = np.array([row["javakh_seconds"] for row in RUNTIME_ROWS])
     y = np.arange(len(labels))
-    height = 0.34
+    height = 0.22
 
-    cpp_bars = ax.barh(y + height / 2, cpp, height, label="cppkh", color="#207567")
-    java_bars = ax.barh(y - height / 2, java, height, label="patched JavaKh", color="#b14a35")
-    annotate_bars(ax, cpp_bars, "s")
-    annotate_bars(ax, java_bars, "s")
+    offsets = [height, 0.0, -height]
+    for (name, key, color), offset in zip(SERIES, offsets):
+        values = np.array([row[key] for row in RUNTIME_ROWS])
+        bars = ax.barh(y + offset, values, height, label=name, color=color)
+        annotate_bars(ax, bars, "s")
 
-    label_x = max(java) * 0.72
+    java = np.array([row["javakh_seconds"] for row in RUNTIME_ROWS])
+    label_x = max(java) * 0.70
     for index, row in enumerate(RUNTIME_ROWS):
         speedup = row["javakh_seconds"] / row["cppkh_seconds"]
+        interface_speedup = row["javakh_seconds"] / row["cppkh_interface_seconds"]
         ax.text(
             label_x,
             index,
-            f"{speedup:.2f}x faster",
+            f"Java/cpp {speedup:.2f}x\nJava/pkg {interface_speedup:.2f}x",
             va="center",
             ha="center",
-            fontsize=10,
+            fontsize=9,
             fontweight="bold",
             color="#222222",
         )
@@ -100,24 +112,28 @@ def draw_memory(ax: plt.Axes) -> bool:
 
     labels = ["Full 8397 peak RSS"]
     cpp = np.array([MEMORY_MIB["cppkh_peak_rss"]], dtype=float)
+    interface = np.array([MEMORY_MIB["cppkh_interface_peak_rss"]], dtype=float)
     java = np.array([MEMORY_MIB["javakh_peak_rss"]], dtype=float)
     y = np.arange(len(labels))
-    height = 0.34
+    height = 0.22
 
-    cpp_bars = ax.barh(y + height / 2, cpp, height, label="cppkh", color="#207567")
-    java_bars = ax.barh(y - height / 2, java, height, label="patched JavaKh", color="#b14a35")
+    cpp_bars = ax.barh(y + height, cpp, height, label="cppkh", color="#207567")
+    interface_bars = ax.barh(y, interface, height, label="cppkh-interface", color="#536d99")
+    java_bars = ax.barh(y - height, java, height, label="patched JavaKh", color="#b14a35")
     annotate_bars(ax, cpp_bars, " MiB")
+    annotate_bars(ax, interface_bars, " MiB")
     annotate_bars(ax, java_bars, " MiB")
 
     for index in range(len(labels)):
         ratio = java[index] / cpp[index]
+        interface_ratio = java[index] / interface[index]
         ax.text(
             max(cpp[index], java[index]) * 0.60,
             index,
-            f"{ratio:.2f}x Java/C++",
+            f"Java/cpp {ratio:.2f}x\nJava/pkg {interface_ratio:.2f}x",
             va="center",
             ha="center",
-            fontsize=10,
+            fontsize=9,
             fontweight="bold",
             color="#222222",
         )
@@ -143,7 +159,7 @@ def main() -> int:
         fig, ax = plt.subplots(figsize=(9, 5.5), constrained_layout=True)
         draw_runtime(ax)
 
-    fig.suptitle("cppkh vs Patched Bundled JavaKh", fontsize=15, fontweight="bold")
+    fig.suptitle("cppkh, cppkh-interface, and Patched Bundled JavaKh", fontsize=15, fontweight="bold")
     output = ASSET_DIR / "benchmark_runtime_memory.png"
     fig.savefig(output, dpi=180)
     print(output)

@@ -153,7 +153,7 @@ switch ($Backend) {
     "single" { $cxxflags += "-DKH_THREAD_BACKEND_SINGLE" }
 }
 
-if ($Lto -and -not $NoLto -and (Test-Flag "-flto")) {
+if (-not $NoLto -and (Test-Flag "-flto")) {
     $cxxflags += "-flto"
     $ldflags += "-flto"
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import hashlib
 import os
 import pathlib
@@ -22,6 +23,7 @@ import pd_code_sanity
 
 PathLike = Union[str, os.PathLike]
 PdInput = Union[str, Sequence[Sequence[int]]]
+PdManyInput = Union[str, Sequence[PdInput]]
 UNKNOT_RESULT = "q^-1*t^0*Z[0] + q^1*t^0*Z[0]"
 
 
@@ -88,9 +90,37 @@ def normalize_pd_code(pd_code: PdInput) -> str:
     return _format_pd(_as_crossings(pd_code))
 
 
+def normalize_pd_codes(pd_codes: PdManyInput) -> str:
+    """Normalize one or more PD codes into a newline-separated PD document."""
+
+    if isinstance(pd_codes, str):
+        return pd_codes.strip()
+    return "\n".join(normalize_pd_code(pd_code) for pd_code in pd_codes)
+
+
+@contextlib.contextmanager
 def _resource_source_path():
     source = resources.files("cppkh_interface") / "data" / "src" / "main.cpp"
-    return resources.as_file(source)
+    try:
+        with resources.as_file(source) as resource_path:
+            if pathlib.Path(resource_path).exists():
+                yield pathlib.Path(resource_path)
+                return
+    except FileNotFoundError:
+        pass
+
+    current = pathlib.Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "src" / "main.cpp"
+        if candidate.exists():
+            yield candidate
+            return
+
+    raise CppkhInterfaceError(
+        "cppkh C++ source was not found. Installed wheels include it under "
+        "cppkh_interface/data/src/main.cpp; editable checkouts use the "
+        "repository root src/main.cpp."
+    )
 
 
 def _cache_dir() -> pathlib.Path:
@@ -217,17 +247,19 @@ def get_cppkh_executable() -> pathlib.Path:
     return compile_cppkh()
 
 
-def _run_cppkh(
+def _run_cppkh_document(
     pd_text: str,
     *,
     encoding: Optional[str] = None,
     threads: Union[str, int] = "1",
+    simplify_pd: bool = False,
     print_simplified_pd: bool = False,
-) -> str:
+) -> list[str]:
     exe = compile_cppkh()
     with tempfile.NamedTemporaryFile("w", suffix=".pd", encoding="utf-8", delete=False) as handle:
         handle.write(pd_text)
-        handle.write("\n")
+        if pd_text and not pd_text.endswith("\n"):
+            handle.write("\n")
         pd_file = handle.name
 
     command = [
@@ -237,8 +269,9 @@ def _run_cppkh(
         "--quiet",
         "--threads",
         str(threads),
-        "--no-simplify-pd",
     ]
+    if not simplify_pd:
+        command.append("--no-simplify-pd")
     if print_simplified_pd:
         command.append("--print-simplified-pd")
 
@@ -270,12 +303,32 @@ def _run_cppkh(
         raise CppkhInterfaceError(detail or f"cppkh exited with code {result.returncode}")
 
     if print_simplified_pd:
-        return result.stdout.strip()
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     matches = re.findall(r'"([^"]*)"', result.stdout)
     if not matches:
         raise CppkhInterfaceError(f"result not found in cppkh output: {result.stdout!r}")
-    return matches[-1]
+    return matches
+
+
+def _run_cppkh(
+    pd_text: str,
+    *,
+    encoding: Optional[str] = None,
+    threads: Union[str, int] = "1",
+    simplify_pd: bool = False,
+    print_simplified_pd: bool = False,
+) -> str:
+    results = _run_cppkh_document(
+        pd_text,
+        encoding=encoding,
+        threads=threads,
+        simplify_pd=simplify_pd,
+        print_simplified_pd=print_simplified_pd,
+    )
+    if len(results) != 1:
+        raise CppkhInterfaceError(f"expected exactly one result, got {len(results)}")
+    return results[0]
 
 
 def _prepare_crossings(pd_code: PdInput, de_r1: bool, de_k8: bool) -> list[list[int]]:
@@ -288,6 +341,29 @@ def _prepare_crossings(pd_code: PdInput, de_r1: bool, de_k8: bool) -> list[list[
     return crossings
 
 
+def _prepare_many_for_cppkh(
+    pd_codes: PdManyInput,
+    *,
+    de_r1: bool,
+    de_k8: bool,
+) -> tuple[str, bool]:
+    if de_r1 != de_k8:
+        raise ValueError(
+            "cppkh batch mode supports de_r1 and de_k8 only as a pair. "
+            "Use both True for backend R1+nugatory simplification or both False for raw PD input."
+        )
+    if isinstance(pd_codes, str):
+        return pd_codes.strip(), bool(de_r1 and de_k8)
+
+    prepared = []
+    use_cpp_simplify = bool(de_r1 and de_k8)
+    for pd_code in pd_codes:
+        crossings = _as_crossings(pd_code)
+        _check_sanity(crossings)
+        prepared.append(_format_pd(crossings))
+    return "\n".join(prepared), use_cpp_simplify
+
+
 def solve_khovanov(
     pd_code: PdInput,
     encoding: Optional[str] = None,
@@ -297,12 +373,63 @@ def solve_khovanov(
 ) -> str:
     """Compute Khovanov homology with a javakh-interface compatible signature."""
 
+    if de_r1 == de_k8:
+        crossings = _as_crossings(pd_code)
+        _check_sanity(crossings)
+        if show_real_pdcode:
+            if de_r1:
+                simplified = _run_cppkh_document(
+                    _format_pd(crossings),
+                    encoding=encoding,
+                    simplify_pd=True,
+                    print_simplified_pd=True,
+                )
+                print(f"Real PD code after de_r1 and de_k8: {simplified[0] if simplified else ''}")
+            else:
+                print(f"Real PD code after de_r1 and de_k8: {crossings}")
+        if crossings == []:
+            return UNKNOT_RESULT
+        return _run_cppkh(_format_pd(crossings), encoding=encoding, simplify_pd=de_r1)
+
     crossings = _prepare_crossings(pd_code, de_r1=de_r1, de_k8=de_k8)
     if show_real_pdcode:
         print(f"Real PD code after de_r1 and de_k8: {crossings}")
     if crossings == []:
         return UNKNOT_RESULT
     return _run_cppkh(_format_pd(crossings), encoding=encoding)
+
+
+def solve_many_khovanov(
+    pd_codes: PdManyInput,
+    encoding: Optional[str] = None,
+    de_r1: bool = True,
+    de_k8: bool = True,
+    show_real_pdcode: bool = False,
+    threads: Union[str, int] = "1",
+) -> list[str]:
+    """Compute many PD codes in one cppkh process.
+
+    With the default ``de_r1=True`` and ``de_k8=True`` settings, the raw PD
+    document is passed directly to cppkh and the C++ simplifier handles R1 then
+    nugatory crossing removal for the whole batch.
+    """
+
+    document, use_cpp_simplify = _prepare_many_for_cppkh(pd_codes, de_r1=de_r1, de_k8=de_k8)
+    if show_real_pdcode:
+        if use_cpp_simplify:
+            simplified = _run_cppkh_document(
+                document,
+                encoding=encoding,
+                threads=threads,
+                simplify_pd=True,
+                print_simplified_pd=True,
+            )
+            print(f"Real PD code after de_r1 and de_k8: {simplified}")
+        else:
+            print(f"Real PD code after de_r1 and de_k8: {document.splitlines()}")
+    if not document:
+        return []
+    return _run_cppkh_document(document, encoding=encoding, threads=threads, simplify_pd=use_cpp_simplify)
 
 
 def compute_pd(
@@ -316,12 +443,52 @@ def compute_pd(
 ) -> str:
     """Compute Khovanov homology using the same defaults as solve_khovanov."""
 
+    if de_r1 == de_k8:
+        crossings = _as_crossings(pd_code)
+        _check_sanity(crossings)
+        if show_real_pdcode:
+            if de_r1:
+                simplified = _run_cppkh_document(
+                    _format_pd(crossings),
+                    encoding=encoding,
+                    threads=threads,
+                    simplify_pd=True,
+                    print_simplified_pd=True,
+                )
+                print(f"Real PD code after de_r1 and de_k8: {simplified[0] if simplified else ''}")
+            else:
+                print(f"Real PD code after de_r1 and de_k8: {crossings}")
+        if crossings == []:
+            return UNKNOT_RESULT
+        return _run_cppkh(_format_pd(crossings), encoding=encoding, threads=threads, simplify_pd=de_r1)
+
     crossings = _prepare_crossings(pd_code, de_r1=de_r1, de_k8=de_k8)
     if show_real_pdcode:
         print(f"Real PD code after de_r1 and de_k8: {crossings}")
     if crossings == []:
         return UNKNOT_RESULT
     return _run_cppkh(_format_pd(crossings), encoding=encoding, threads=threads)
+
+
+def compute_many_pd(
+    pd_codes: PdManyInput,
+    *,
+    encoding: Optional[str] = None,
+    de_r1: bool = True,
+    de_k8: bool = True,
+    show_real_pdcode: bool = False,
+    threads: Union[str, int] = "1",
+) -> list[str]:
+    """Compute many PD codes in one cached cppkh executable invocation."""
+
+    return solve_many_khovanov(
+        pd_codes,
+        encoding=encoding,
+        de_r1=de_r1,
+        de_k8=de_k8,
+        show_real_pdcode=show_real_pdcode,
+        threads=threads,
+    )
 
 
 def simplify_pd(pd_code: PdInput, *, de_r1: bool = True, de_k8: bool = True) -> str:

@@ -15,8 +15,8 @@ Options:
   --native             Add -march=native when supported (default)
   --no-native          Do not add -march=native
   --portable           Same as --no-native
-  --lto                Try -flto
-  --no-lto             Do not try -flto (default)
+  --lto                Try -flto (default)
+  --no-lto             Do not try -flto
   --no-strip           Do not strip symbols from the final executable
   --extra-cxxflags X   Append extra compiler flags
   --extra-ldflags X    Append extra linker flags
@@ -38,7 +38,7 @@ name="javakh_cpp"
 want_static=0
 want_shared=0
 want_native=1
-want_lto=0
+want_lto=1
 want_strip=1
 extra_cxxflags="${CXXFLAGS:-}"
 extra_ldflags="${LDFLAGS:-}"

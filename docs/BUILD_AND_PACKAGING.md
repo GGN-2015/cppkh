@@ -49,11 +49,11 @@ Default outputs:
 | Linux | `dist/linux/javakh_cpp` |
 | macOS | `dist/macos/javakh_cpp` |
 
-With no arguments, the scripts use `-O3 -DNDEBUG`, enable `-march=native` when
-the compiler accepts it, keep LTO disabled by default, and strip the final
-binary when a compatible `strip` is available. The default mode keeps dynamic
-runtime libraries dynamic, scans the finished binary, and copies any
-non-system runtime dependencies it can locate into the output directory.
+With no arguments, the scripts use `-O3 -DNDEBUG`, enable `-march=native` and
+`-flto` when the compiler accepts them, and strip the final binary when a
+compatible `strip` is available. The default mode keeps dynamic runtime
+libraries dynamic, scans the finished binary, and copies any non-system runtime
+dependencies it can locate into the output directory.
 
 Use `--portable` when the result must run on CPUs older or different from the
 build machine. Use `--static` only when you explicitly want the executable to
@@ -102,12 +102,17 @@ const char* cppkh_last_error(void);
 void cppkh_free(char* value);
 char* cppkh_compute_pd(const char* pd_code);
 char* cppkh_compute_pd_ex(const char* pd_code, int simplify_pd, int reorder_crossings);
+char* cppkh_compute_pd_batch(const char* pd_codes);
+char* cppkh_compute_pd_batch_ex(const char* pd_codes, int simplify_pd, int reorder_crossings);
 char* cppkh_simplify_pd(const char* pd_code);
 ```
 
-Strings returned by `cppkh_compute_pd`, `cppkh_compute_pd_ex`, and
-`cppkh_simplify_pd` are allocated by the library and must be released with
-`cppkh_free`.
+Strings returned by `cppkh_compute_pd`, `cppkh_compute_pd_ex`,
+`cppkh_compute_pd_batch`, `cppkh_compute_pd_batch_ex`, and `cppkh_simplify_pd`
+are allocated by the library and must be released with `cppkh_free`.
+
+The batch compute functions accept a text document containing one or more
+standard `PD[...]` blocks and return one unquoted homology string per line.
 
 ## Script Options
 
@@ -141,8 +146,8 @@ Common options:
 --native             add -march=native when supported (default)
 --no-native          disable -march=native
 --portable           same as --no-native
---lto                try -flto
---no-lto             keep LTO disabled (default)
+--lto                try -flto (default)
+--no-lto             disable LTO
 --no-strip           keep symbols
 --extra-cxxflags X   append compiler flags
 --extra-ldflags X    append linker flags

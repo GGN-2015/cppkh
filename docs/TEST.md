@@ -86,6 +86,50 @@ python tools/test_kh_consistency.py --last 1000 --out-dir benchmark/last1000
 python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark/com100
 ```
 
+## cppkh-interface Timing
+
+`cppkh-interface` is measured separately so that its first-use C++ compilation
+does not contaminate runtime numbers. Install the package into a Python
+environment, warm the cache once, then run the batch benchmark against an
+already prepared PD file:
+
+```sh
+python tools/benchmark_cppkh_interface.py \
+  --prepared-pd benchmark/triad-full8397-011/prepared.pd \
+  --expected-out benchmark/triad-full8397-011/cppkh.out \
+  --out benchmark/cppkh-interface-full8397.json
+```
+
+The script selects a 64-bit benchmark compiler when one is available. Override
+that selection with `CPPKH_BENCHMARK_CXX`, `CPPKH_INTERFACE_CXX`, or `CXX`.
+The compiler choice lives in the benchmark helper, not in the published Python
+package.
+
+Use slices in the same way:
+
+```sh
+python tools/benchmark_cppkh_interface.py --limit 1000 --out benchmark/cppkh-interface-first1000.json
+python tools/benchmark_cppkh_interface.py --last 1000 --out benchmark/cppkh-interface-last1000.json
+```
+
+## Memory Test
+
+Measure full-input process-tree RSS for all three front ends:
+
+```sh
+python tools/measure_peak_memory.py \
+  --prepared-pd benchmark/triad-full8397-011/prepared.pd \
+  --cpp-exe benchmark/bench-triad-cpp/javakh_cpp.exe \
+  --cppkh-interface-python path/to/python-with-cppkh-interface \
+  --cppkh-interface-cache-dir benchmark/cppkh-interface-cache \
+  --cppkh-interface-cxx path/to/g++ \
+  --out benchmark/triad-full8397-memory.json
+```
+
+The `cppkh-interface` memory row includes the Python wrapper plus its child
+`cppkh` executable. The command assumes the executable is already cached; warm
+it before measuring when you want runtime-only memory and time.
+
 ## Important Options
 
 ```text

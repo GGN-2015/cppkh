@@ -69,6 +69,12 @@ def normalize_pd_code(pd_code: PdInput) -> str:
     return _format_pd(pd_code)
 
 
+def normalize_pd_codes(pd_codes: Sequence[PdInput]) -> str:
+    """Normalize multiple PD-code inputs into a newline-separated PD document."""
+
+    return "\n".join(normalize_pd_code(pd_code) for pd_code in pd_codes)
+
+
 def _default_library_names():
     if sys.platform.startswith("win"):
         return ("cppkh.dll", "javakh_cpp.dll")
@@ -163,6 +169,16 @@ class CppKhLibrary:
         ]
         self._lib.cppkh_compute_pd_ex.restype = ctypes.c_void_p
 
+        self._lib.cppkh_compute_pd_batch.argtypes = [ctypes.c_char_p]
+        self._lib.cppkh_compute_pd_batch.restype = ctypes.c_void_p
+
+        self._lib.cppkh_compute_pd_batch_ex.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        self._lib.cppkh_compute_pd_batch_ex.restype = ctypes.c_void_p
+
         self._lib.cppkh_simplify_pd.argtypes = [ctypes.c_char_p]
         self._lib.cppkh_simplify_pd.restype = ctypes.c_void_p
 
@@ -185,6 +201,22 @@ class CppKhLibrary:
         )
         return self._take_owned_string(ptr)
 
+    def compute_many_pd(
+        self,
+        pd_codes: Sequence[PdInput],
+        *,
+        simplify_pd: bool = True,
+        reorder_crossings: bool = True,
+    ) -> list[str]:
+        raw = normalize_pd_codes(pd_codes).encode("utf-8")
+        ptr = self._lib.cppkh_compute_pd_batch_ex(
+            raw,
+            1 if simplify_pd else 0,
+            1 if reorder_crossings else 0,
+        )
+        value = self._take_owned_string(ptr)
+        return value.splitlines() if value else []
+
     def simplify_pd(self, pd_code: PdInput) -> str:
         ptr = self._lib.cppkh_simplify_pd(normalize_pd_code(pd_code).encode("utf-8"))
         return self._take_owned_string(ptr)
@@ -202,6 +234,10 @@ class CppKhLibrary:
 
 def compute_pd(pd_code: PdInput, library_path: Optional[PathLike] = None) -> str:
     return CppKhLibrary(library_path).compute_pd(pd_code)
+
+
+def compute_many_pd(pd_codes: Sequence[PdInput], library_path: Optional[PathLike] = None) -> list[str]:
+    return CppKhLibrary(library_path).compute_many_pd(pd_codes)
 
 
 if __name__ == "__main__":

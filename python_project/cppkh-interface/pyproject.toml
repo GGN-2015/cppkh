@@ -1,6 +1,6 @@
 [project]
 name = "cppkh-interface"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python interface for cppkh Khovanov homology computation with runtime C++ compilation."
 authors = [
     {name = "GGN_2015", email = "neko@jlulug.org"}
@@ -26,9 +26,11 @@ cppkh-interface = "cppkh_interface.main:main"
 [tool.poetry]
 packages = [{ include = "cppkh_interface" }]
 include = [
+    { path = "build_backend/cppkh_interface_build_backend.py", format = ["sdist"] },
     { path = "cppkh_interface/data/src/main.cpp", format = ["sdist", "wheel"] }
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=2.0.0,<3.0.0", "setuptools>=61"]
+build-backend = "cppkh_interface_build_backend"
+backend-path = ["build_backend"]

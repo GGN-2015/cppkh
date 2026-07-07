@@ -8,7 +8,7 @@ set "NAME=javakh_cpp"
 set "WANT_SHARED=0"
 set "WANT_STATIC=0"
 set "WANT_NATIVE=1"
-set "WANT_LTO=0"
+set "WANT_LTO=1"
 set "WANT_STRIP=1"
 set "EXTRA_CXXFLAGS=%CXXFLAGS%"
 set "EXTRA_LDFLAGS=%LDFLAGS%"
@@ -253,8 +253,8 @@ echo   --static             Try static linking
 echo   --native             Add -march=native if supported ^(default^)
 echo   --no-native          Do not add -march=native
 echo   --portable           Same as --no-native
-echo   --lto                Try -flto
-echo   --no-lto             Do not try -flto ^(default^)
+echo   --lto                Try -flto ^(default^)
+echo   --no-lto             Do not try -flto
 echo   --no-strip           Do not strip symbols
 echo   --extra-cxxflags X   Append extra compiler flags
 echo   --extra-ldflags X    Append extra linker flags
