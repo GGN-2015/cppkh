@@ -9,12 +9,16 @@ def parse_crossings(text):
     body = text.strip()
     if ":" in body:
         body = body.split(":", 1)[1].strip()
+    elif "|" in body:
+        if body.startswith("[") and body.endswith("]"):
+            body = body[1:-1].strip()
+        body = body.split("|", 1)[1].strip()
 
     if "X[" in body or body.startswith("PD["):
         crossings = []
         for match in re.finditer(r"X\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]", body):
             crossings.append([int(match.group(i)) for i in range(1, 5)])
-        if crossings:
+        if crossings or body.replace(" ", "") == "PD[]":
             return crossings
 
     value = ast.literal_eval(body)
@@ -65,7 +69,13 @@ def main():
             continue
         if args.limit > 0 and len(pd_lines) >= args.limit:
             break
-        label = line.split(":", 1)[0].strip() if ":" in line else f"#{len(pd_lines) + 1}"
+        if ":" in line:
+            label = line.split(":", 1)[0].strip()
+        elif "|" in line:
+            label_text = line[1:-1].strip() if line.startswith("[") and line.endswith("]") else line
+            label = label_text.split("|", 1)[0].strip()
+        else:
+            label = f"#{len(pd_lines) + 1}"
         crossings = parse_crossings(line)
         if args.simplify == "external":
             crossings = simplify_external(crossings)

@@ -65,6 +65,7 @@ copied beside it.
 - [Build and packaging options](docs/BUILD_AND_PACKAGING.md)
 - [Command-line options](docs/CLI_OPTIONS.md)
 - [Python ctypes interface](docs/PYTHON_CTYPES.md)
+- [Testing against JavaKh](docs/TEST.md)
 - [Benchmark results](docs/BENCHMARKS.md)
 
 ## References
