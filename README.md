@@ -1,8 +1,7 @@
 # cppkh
 
 `cppkh` is a standalone C++14 port of the integer JavaKh Khovanov homology
-computation path. It has no mandatory third-party runtime dependency and does
-not require Java or a fixed `PD.txt` file.
+computation path.
 
 ## Quick Start
 
