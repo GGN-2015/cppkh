@@ -5,6 +5,25 @@ computation path.
 
 ## Quick Start
 
+Python package:
+
+```sh
+pip install cppkh-interface
+```
+
+```python
+import cppkh_interface
+
+pd_code = [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]
+
+print(cppkh_interface.solve_khovanov(pd_code))
+print(cppkh_interface.solve_many_khovanov([pd_code, pd_code]))
+```
+
+The Python package compiles and caches the local `cppkh` executable on first
+use. Set `CXX` before running Python when you want to choose a specific C++
+compiler.
+
 Build the fastest executable that the current machine can support:
 
 Windows:
