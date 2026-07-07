@@ -4,7 +4,7 @@ setlocal EnableExtensions
 set "BACKEND=auto"
 set "CXX=%CXX%"
 set "OUT="
-set "NAME=javakh_cpp"
+set "NAME=cppkh"
 set "WANT_SHARED=0"
 set "WANT_STATIC=0"
 set "WANT_NATIVE=1"
@@ -200,8 +200,8 @@ exit /b %ERRORLEVEL%
 
 :test_backend
 set "PKG_BACKEND=%~1"
-set "PKG_TMP=%TEMP%\javakh_cpp_backend_%RANDOM%.cpp"
-set "PKG_EXE=%TEMP%\javakh_cpp_backend_%RANDOM%.exe"
+set "PKG_TMP=%TEMP%\cppkh_backend_%RANDOM%.cpp"
+set "PKG_EXE=%TEMP%\cppkh_backend_%RANDOM%.exe"
 if /I "%PKG_BACKEND%"=="pthread" (
   echo #include ^<pthread.h^>>"%PKG_TMP%"
   echo int main^(^){return 0;}>>"%PKG_TMP%"
@@ -231,8 +231,8 @@ del "%PKG_EXE%" >nul 2>nul
 exit /b %PKG_RC%
 
 :test_flag
-set "PKG_TMP=%TEMP%\javakh_cpp_flag_%RANDOM%.cpp"
-set "PKG_EXE=%TEMP%\javakh_cpp_flag_%RANDOM%.exe"
+set "PKG_TMP=%TEMP%\cppkh_flag_%RANDOM%.cpp"
+set "PKG_EXE=%TEMP%\cppkh_flag_%RANDOM%.exe"
 echo int main(){return 0;}>"%PKG_TMP%"
 %CXX% -std=c++14 %~1 "%PKG_TMP%" -o "%PKG_EXE%" >nul 2>nul
 set "PKG_RC=%ERRORLEVEL%"
@@ -247,7 +247,7 @@ echo Options:
 echo   --backend NAME       auto, win32, pthread, std, boost, single ^(default: auto^)
 echo   --cxx COMMAND        C++ compiler command ^(default: %%CXX%% or g++^)
 echo   --out DIR            Output directory ^(default: dist\windows^)
-echo   --name NAME          Executable or library base name ^(default: javakh_cpp^)
+echo   --name NAME          Executable or library base name ^(default: cppkh^)
 echo   --shared             Build a .dll shared library instead of an executable
 echo   --static             Try static linking
 echo   --native             Add -march=native if supported ^(default^)

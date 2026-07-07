@@ -77,10 +77,10 @@ def normalize_pd_codes(pd_codes: Sequence[PdInput]) -> str:
 
 def _default_library_names():
     if sys.platform.startswith("win"):
-        return ("cppkh.dll", "javakh_cpp.dll")
+        return ("cppkh.dll",)
     if sys.platform == "darwin":
-        return ("libcppkh.dylib", "cppkh.dylib", "libjavakh_cpp.dylib")
-    return ("libcppkh.so", "cppkh.so", "libjavakh_cpp.so")
+        return ("libcppkh.dylib", "cppkh.dylib")
+    return ("libcppkh.so", "cppkh.so")
 
 
 def _candidate_paths() -> list[pathlib.Path]:

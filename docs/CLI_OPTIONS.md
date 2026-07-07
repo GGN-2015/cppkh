@@ -8,19 +8,19 @@
 Compute one PD code:
 
 ```sh
-javakh_cpp --pd-code "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"
+cppkh --pd-code "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"
 ```
 
 Compute one file:
 
 ```sh
-javakh_cpp --pd-file PD.txt
+cppkh --pd-file PD.txt
 ```
 
 Compute every `.txt` and `.pd` file in a directory:
 
 ```sh
-javakh_cpp --pd-dir samples
+cppkh --pd-dir samples
 ```
 
 If no input is given, the CLI tries to read `PD.txt` from the current working

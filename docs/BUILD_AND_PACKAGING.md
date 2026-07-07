@@ -45,9 +45,9 @@ Default outputs:
 
 | Platform | Output |
 | --- | --- |
-| Windows | `dist\windows\javakh_cpp.exe` |
-| Linux | `dist/linux/javakh_cpp` |
-| macOS | `dist/macos/javakh_cpp` |
+| Windows | `dist\windows\cppkh.exe` |
+| Linux | `dist/linux/cppkh` |
+| macOS | `dist/macos/cppkh` |
 
 With no arguments, the scripts use `-O3 -DNDEBUG`, enable `-march=native` and
 `-flto` when the compiler accepts them, and strip the final binary when a

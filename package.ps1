@@ -3,7 +3,7 @@ param(
     [string]$Backend = "auto",
     [string]$Cxx = "",
     [string]$Out = "",
-    [string]$Name = "javakh_cpp",
+    [string]$Name = "cppkh",
     [switch]$Shared,
     [switch]$Static,
     [switch]$Native,
@@ -28,7 +28,7 @@ function Split-Args([string]$s) {
 }
 
 function Invoke-TestCompile([string[]]$Arguments, [string]$Source = "int main(){return 0;}", [string[]]$PostArguments = @()) {
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("javakh_cpp_flag_{0}.cpp" -f ([Guid]::NewGuid()))
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("cppkh_flag_{0}.cpp" -f ([Guid]::NewGuid()))
     $exe = [IO.Path]::ChangeExtension($tmp, ".exe")
     Set-Content -LiteralPath $tmp -Value $Source -Encoding ASCII
     try {

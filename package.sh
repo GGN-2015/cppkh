@@ -9,7 +9,7 @@ Options:
   --backend NAME       auto, pthread, std, boost, win32, single (default: auto)
   --cxx COMMAND        C++ compiler command (default: $CXX or g++)
   --out DIR            Output directory (default: dist/<platform>)
-  --name NAME          Executable or library base name (default: javakh_cpp)
+  --name NAME          Executable or library base name (default: cppkh)
   --shared             Build a shared library (.dll, .so, or .dylib)
   --static             Try to link statically where the platform supports it
   --native             Add -march=native when supported (default)
@@ -34,7 +34,7 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 backend="auto"
 cxx="${CXX:-}"
 out=""
-name="javakh_cpp"
+name="cppkh"
 want_static=0
 want_shared=0
 want_native=1
@@ -86,7 +86,7 @@ else
   target="${out}/${name}${exe_ext}"
 fi
 
-tmpdir="${TMPDIR:-/tmp}/javakh_cpp_pkg_$$"
+tmpdir="${TMPDIR:-/tmp}/cppkh_pkg_$$"
 mkdir -p "$tmpdir"
 trap 'rm -rf "$tmpdir"' EXIT INT TERM
 

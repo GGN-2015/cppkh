@@ -36,13 +36,13 @@ $OutDir = (Resolve-Path $OutDir).Path
 
 if ([string]::IsNullOrWhiteSpace($CppExe)) {
     $cppCandidates = @(
-        (Join-Path $RepoRoot "dist\windows\javakh_cpp.exe"),
-        (Join-Path $RepoRoot "build\javakh_cpp.exe"),
-        (Join-Path $RepoRoot "javakh_cpp.exe")
+        (Join-Path $RepoRoot "dist\windows\cppkh.exe"),
+        (Join-Path $RepoRoot "build\cppkh.exe"),
+        (Join-Path $RepoRoot "cppkh.exe")
     )
     $CppExe = ($cppCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
     if ([string]::IsNullOrWhiteSpace($CppExe)) {
-        throw "Cannot find javakh_cpp.exe. Build first or pass -CppExe."
+        throw "Cannot find cppkh.exe. Build first or pass -CppExe."
     }
 }
 $CppExe = (Resolve-Path $CppExe).Path

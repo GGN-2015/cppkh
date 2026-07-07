@@ -29,7 +29,7 @@ Machine-local benchmark on Windows, 2026-07-07:
 
 - C++ compiler: WinLibs GCC 16.1.0 x86_64 UCRT POSIX SEH.
 - Java VM: Java HotSpot 64-Bit Server VM 21.0.5.
-- `cppkh` executable: `benchmark\bench-triad-cpp\javakh_cpp.exe`.
+- `cppkh` executable: `benchmark\bench-triad-cpp\cppkh.exe`.
 - `cppkh-interface` package: local `cppkh-interface 0.1.1` wheel installed
   into `benchmark\venv-cppkh-interface-011`.
 - `cppkh-interface` timing excludes first-use C++ compilation. The benchmark
@@ -130,7 +130,7 @@ Rerun the peak-RSS measurement on an already prepared full PD file:
 ```sh
 python tools/measure_peak_memory.py \
   --prepared-pd benchmark/triad-full8397-011/prepared.pd \
-  --cpp-exe benchmark/bench-triad-cpp/javakh_cpp.exe \
+  --cpp-exe benchmark/bench-triad-cpp/cppkh.exe \
   --cppkh-interface-python benchmark/venv-cppkh-interface-011/Scripts/python.exe \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache-011 \
   --cppkh-interface-cxx /path/to/g++ \

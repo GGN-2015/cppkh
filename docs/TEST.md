@@ -119,7 +119,7 @@ Measure full-input process-tree RSS for all three front ends:
 ```sh
 python tools/measure_peak_memory.py \
   --prepared-pd benchmark/triad-full8397-011/prepared.pd \
-  --cpp-exe benchmark/bench-triad-cpp/javakh_cpp.exe \
+  --cpp-exe benchmark/bench-triad-cpp/cppkh.exe \
   --cppkh-interface-python path/to/python-with-cppkh-interface \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache \
   --cppkh-interface-cxx path/to/g++ \
@@ -135,7 +135,7 @@ it before measuring when you want runtime-only memory and time.
 ```text
 --input FILE              Input PD-code collection.
 --labels FILE             Optional labels file for mismatch reports.
---cpp-exe PATH            Path to javakh_cpp / javakh_cpp.exe.
+--cpp-exe PATH            Path to cppkh / cppkh.exe.
 --build-cpp               Build cppkh automatically if no executable is found.
 --java-root DIR           Bundled JavaKh reference directory.
 --java COMMAND            Java command, default: java.

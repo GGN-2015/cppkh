@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(javakh_cpp LANGUAGES CXX)
+project(cppkh LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,9 +9,9 @@ set(KH_THREAD_BACKEND "auto" CACHE STRING "Thread backend: auto, pthread, std, b
 set_property(CACHE KH_THREAD_BACKEND PROPERTY STRINGS auto pthread std boost win32 single)
 option(CPPKH_BUILD_SHARED "Build the cppkh shared library" OFF)
 
-add_executable(javakh_cpp src/main.cpp)
-target_include_directories(javakh_cpp PRIVATE src)
-set(KH_TARGETS javakh_cpp)
+add_executable(cppkh src/main.cpp)
+target_include_directories(cppkh PRIVATE src)
+set(KH_TARGETS cppkh)
 
 if(CPPKH_BUILD_SHARED)
   add_library(cppkh SHARED src/main.cpp)

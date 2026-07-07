@@ -3464,7 +3464,7 @@ CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
 
 #ifndef CPPKH_SHARED_LIBRARY
 static void usage() {
-    std::cout << "Usage: javakh_cpp [--pd-file FILE] [--pd-dir DIR] [--pd-code CODE] [--ordered] [--threads N|auto] [--quiet] [--profile] [--no-simplify-pd] [--print-simplified-pd]\n";
+    std::cout << "Usage: cppkh [--pd-file FILE] [--pd-dir DIR] [--pd-code CODE] [--ordered] [--threads N|auto] [--quiet] [--profile] [--no-simplify-pd] [--print-simplified-pd]\n";
     std::cout << "Thread backend: " << KH_THREAD_BACKEND_NAME << "\n";
     std::cout << "Detected CPU threads: " << kh::detectHardwareThreads() << "\n";
     std::cout << "PD simplification: R1 removal then nugatory crossing removal is enabled by default.\n";

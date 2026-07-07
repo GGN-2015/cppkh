@@ -79,7 +79,7 @@ def measure(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepared-pd", required=True, help="Already simplified PD file.")
-    parser.add_argument("--cpp-exe", required=True, help="Path to javakh_cpp executable.")
+    parser.add_argument("--cpp-exe", required=True, help="Path to cppkh executable.")
     parser.add_argument("--java-root", default=str(DEFAULT_JAVA_ROOT), help="Bundled JavaKh directory.")
     parser.add_argument("--java", default="java", help="Java executable.")
     parser.add_argument("--java-xmx", default="4g", help="Java maximum heap.")

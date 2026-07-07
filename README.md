@@ -47,17 +47,17 @@ sh package.sh
 Run one PD code:
 
 ```bat
-dist\windows\javakh_cpp.exe --pd-code "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"
+dist\windows\cppkh.exe --pd-code "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"
 ```
 
-On Linux the default output is `dist/linux/javakh_cpp`; on macOS it is
-`dist/macos/javakh_cpp`.
+On Linux the default output is `dist/linux/cppkh`; on macOS it is
+`dist/macos/cppkh`.
 
 Run a file or directory:
 
 ```bat
-dist\windows\javakh_cpp.exe --pd-file path\to\codes.txt
-dist\windows\javakh_cpp.exe --pd-dir path\to\pdcode_directory
+dist\windows\cppkh.exe --pd-file path\to\codes.txt
+dist\windows\cppkh.exe --pd-dir path\to\pdcode_directory
 ```
 
 R1-move removal and then nugatory-crossing removal are enabled by default.

@@ -131,7 +131,7 @@ def prepare_pd_file(args: argparse.Namespace, out_dir: Path) -> Tuple[Path, Path
 
 
 def candidate_cpp_exes() -> List[Path]:
-    names = ["javakh_cpp.exe"] if os.name == "nt" else ["javakh_cpp"]
+    names = ["cppkh.exe"] if os.name == "nt" else ["cppkh"]
     roots = [
         REPO_ROOT / "dist" / "windows",
         REPO_ROOT / "dist" / "linux",
@@ -141,8 +141,8 @@ def candidate_cpp_exes() -> List[Path]:
         REPO_ROOT,
     ]
     candidates = [root / name for root in roots for name in names]
-    candidates.extend(sorted((REPO_ROOT / "dist").glob("**/javakh_cpp.exe")))
-    candidates.extend(sorted((REPO_ROOT / "dist").glob("**/javakh_cpp")))
+    candidates.extend(sorted((REPO_ROOT / "dist").glob("**/cppkh.exe")))
+    candidates.extend(sorted((REPO_ROOT / "dist").glob("**/cppkh")))
     return candidates
 
 
@@ -436,7 +436,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare cppkh and bundled JavaKh on a PD-code collection.")
     parser.add_argument("--input", default=str(DEFAULT_INPUT), help="PD-code file. Lines may be PD[...] or label: [[...]].")
     parser.add_argument("--labels", default=str(DEFAULT_LABELS), help="Optional labels file for reports.")
-    parser.add_argument("--cpp-exe", default="", help="Path to javakh_cpp executable.")
+    parser.add_argument("--cpp-exe", default="", help="Path to cppkh executable.")
     parser.add_argument("--build-cpp", action="store_true", help="Run the package script if no cppkh executable is found.")
     parser.add_argument("--java-root", default=str(DEFAULT_JAVA_ROOT), help="Bundled JavaKh reference directory.")
     parser.add_argument("--java", default="java", help="Java command.")
