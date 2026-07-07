@@ -8,13 +8,69 @@ the library path to CppKhLibrary when the file is not beside this module.
 from __future__ import annotations
 
 import ctypes
+import ast
 import os
 import pathlib
+import re
 import sys
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 
 PathLike = Union[str, os.PathLike]
+PdInput = Union[str, Sequence[Sequence[int]]]
+
+
+def _format_pd(crossings: Sequence[Sequence[int]]) -> str:
+    parts = []
+    for crossing in crossings:
+        values = list(crossing)
+        if len(values) != 4:
+            raise ValueError(f"PD crossing must have four entries: {crossing!r}")
+        parts.append("X[{},{},{},{}]".format(*(int(value) for value in values)))
+    return "PD[" + ",".join(parts) + "]"
+
+
+def _parse_x_crossings(text: str) -> Optional[str]:
+    pattern = r"X\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]"
+    crossings = []
+    for match in re.finditer(pattern, text):
+        crossings.append([int(match.group(i)) for i in range(1, 5)])
+    if crossings:
+        return _format_pd(crossings)
+    return None
+
+
+def normalize_pd_code(pd_code: PdInput) -> str:
+    """Normalize accepted Python PD-code inputs into a C++ friendly PD[...] string."""
+
+    if isinstance(pd_code, str):
+        body = pd_code.strip()
+        if ":" in body:
+            body = body.split(":", 1)[1].strip()
+        elif "|" in body:
+            if body.startswith("[") and body.endswith("]"):
+                body = body[1:-1].strip()
+            body = body.split("|", 1)[1].strip()
+
+        if body.replace(" ", "") == "PD[]":
+            return "PD[]"
+        if body.startswith("PD["):
+            parsed = _parse_x_crossings(body)
+            return parsed if parsed is not None else body
+        if body.replace(" ", "") == "[]":
+            return "PD[]"
+
+        parsed = _parse_x_crossings(body)
+        if parsed is not None:
+            return parsed
+
+        try:
+            value = ast.literal_eval(body)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError(f"unsupported PD-code string format: {pd_code!r}") from exc
+        return _format_pd(value)
+
+    return _format_pd(pd_code)
 
 
 def _default_library_names():
@@ -120,12 +176,12 @@ class CppKhLibrary:
 
     def compute_pd(
         self,
-        pd_code: str,
+        pd_code: PdInput,
         *,
         simplify_pd: bool = True,
         reorder_crossings: bool = True,
     ) -> str:
-        raw = pd_code.encode("utf-8")
+        raw = normalize_pd_code(pd_code).encode("utf-8")
         ptr = self._lib.cppkh_compute_pd_ex(
             raw,
             1 if simplify_pd else 0,
@@ -133,8 +189,8 @@ class CppKhLibrary:
         )
         return self._take_owned_string(ptr)
 
-    def simplify_pd(self, pd_code: str) -> str:
-        ptr = self._lib.cppkh_simplify_pd(pd_code.encode("utf-8"))
+    def simplify_pd(self, pd_code: PdInput) -> str:
+        ptr = self._lib.cppkh_simplify_pd(normalize_pd_code(pd_code).encode("utf-8"))
         return self._take_owned_string(ptr)
 
     def _take_owned_string(self, ptr: int) -> str:
@@ -148,7 +204,7 @@ class CppKhLibrary:
             self._lib.cppkh_free(ptr)
 
 
-def compute_pd(pd_code: str, library_path: Optional[PathLike] = None) -> str:
+def compute_pd(pd_code: PdInput, library_path: Optional[PathLike] = None) -> str:
     return CppKhLibrary(library_path).compute_pd(pd_code)
 
 

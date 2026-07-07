@@ -54,6 +54,8 @@ from python.cppkh_ctypes import CppKhLibrary
 
 kh = CppKhLibrary(r"dist\windows\cppkh.dll")
 print(kh.compute_pd("PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"))
+print(kh.compute_pd("[[1,5,2,4], [3,1,4,6], [5,3,6,2]]"))
+print(kh.compute_pd([[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]))
 ```
 
 On Linux:
@@ -93,7 +95,7 @@ python3 python/cppkh_ctypes.py "$CPPKH_LIBRARY" "PD[X[1,5,2,4],X[3,1,4,6],X[5,3,
 ## Python API
 
 ```python
-from python.cppkh_ctypes import CppKhLibrary, compute_pd
+from python.cppkh_ctypes import CppKhLibrary, compute_pd, normalize_pd_code
 
 kh = CppKhLibrary("path/to/library")
 
@@ -104,6 +106,21 @@ kh.simplify_pd(pd_code)
 
 compute_pd(pd_code, "path/to/library")
 ```
+
+`pd_code` may be any of these Python-side forms:
+
+```python
+"PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]"
+"X[1,5,2,4], X[3,1,4,6], X[5,3,6,2]"
+"[[1,5,2,4], [3,1,4,6], [5,3,6,2]]"
+"0000001.txt: [[2,3,1,4], [3,2,4,1]]"
+"[K3a1|[[1,5,2,4], [3,1,4,6], [5,3,6,2]]]"
+[[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]
+[]
+```
+
+The wrapper normalizes these forms with `normalize_pd_code()` before calling
+the C ABI, so the C++ library still receives a standard `PD[...]` string.
 
 `compute_pd` uses the same defaults as the CLI: R1 removal, nugatory-crossing
 removal, and crossing reordering are enabled.
