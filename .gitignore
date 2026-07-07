@@ -43,6 +43,10 @@
 build/
 Build/
 build-*/
+dist/
+benchmark/
+$pgo/
+gmon.out
 
 # CMake generated files
 CMakeFiles/
