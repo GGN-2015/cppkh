@@ -1,32 +1,22 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
-set BACKEND=%1
-if "%BACKEND%"=="" set BACKEND=win32
+set "ARGS=--out build --no-strip"
 
-set CXX=g++
-set CXXFLAGS=-std=c++14 -O3 -DNDEBUG -Isrc
-set LIBS=
+if "%~1"=="" goto run
+if /I "%~1"=="auto" set "ARGS=%ARGS% --backend auto" & shift & goto append
+if /I "%~1"=="win32" set "ARGS=%ARGS% --backend win32" & shift & goto append
+if /I "%~1"=="pthread" set "ARGS=%ARGS% --backend pthread" & shift & goto append
+if /I "%~1"=="std" set "ARGS=%ARGS% --backend std" & shift & goto append
+if /I "%~1"=="boost" set "ARGS=%ARGS% --backend boost" & shift & goto append
+if /I "%~1"=="single" set "ARGS=%ARGS% --backend single" & shift & goto append
 
-if /I "%BACKEND%"=="win32" (
-  set CXXFLAGS=%CXXFLAGS% -DKH_THREAD_BACKEND_WIN32
-) else if /I "%BACKEND%"=="pthread" (
-  set CXXFLAGS=%CXXFLAGS% -DKH_THREAD_BACKEND_PTHREAD
-  set LIBS=-pthread
-) else if /I "%BACKEND%"=="std" (
-  set CXXFLAGS=%CXXFLAGS% -DKH_THREAD_BACKEND_STD
-) else if /I "%BACKEND%"=="boost" (
-  set CXXFLAGS=%CXXFLAGS% -DKH_THREAD_BACKEND_BOOST
-  set LIBS=-lboost_thread -lboost_system
-) else if /I "%BACKEND%"=="single" (
-  set CXXFLAGS=%CXXFLAGS% -DKH_THREAD_BACKEND_SINGLE
-) else (
-  echo Unknown backend "%BACKEND%".
-  echo Choose one of: win32, pthread, std, boost, single
-  exit /b 2
-)
+:append
+if "%~1"=="" goto run
+set "ARGS=%ARGS% %1"
+shift
+goto append
 
-if not exist build mkdir build
-%CXX% %CXXFLAGS% src\main.cpp -o build\javakh_cpp.exe %LIBS%
-if errorlevel 1 exit /b %errorlevel%
-echo Built build\javakh_cpp.exe with %BACKEND% threading
+:run
+call "%~dp0package.bat" %ARGS%
+exit /b %ERRORLEVEL%

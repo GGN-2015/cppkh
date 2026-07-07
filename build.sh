@@ -1,36 +1,17 @@
 #!/usr/bin/env sh
 set -eu
 
-backend="${1:-pthread}"
-cxx="${CXX:-g++}"
-cxxflags="-std=c++14 -O3 -DNDEBUG -Isrc"
-libs=""
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
-case "$backend" in
-  pthread)
-    cxxflags="$cxxflags -DKH_THREAD_BACKEND_PTHREAD"
-    libs="-pthread"
-    ;;
-  std)
-    cxxflags="$cxxflags -DKH_THREAD_BACKEND_STD"
-    libs="-pthread"
-    ;;
-  boost)
-    cxxflags="$cxxflags -DKH_THREAD_BACKEND_BOOST"
-    libs="-lboost_thread -lboost_system -pthread"
-    ;;
-  win32)
-    cxxflags="$cxxflags -DKH_THREAD_BACKEND_WIN32"
-    ;;
-  single)
-    cxxflags="$cxxflags -DKH_THREAD_BACKEND_SINGLE"
-    ;;
-  *)
-    echo "Unknown backend '$backend'. Choose: pthread, std, boost, win32, single" >&2
-    exit 2
-    ;;
-esac
+args="--out build --no-strip"
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    auto|pthread|std|boost|win32|single)
+      args="$args --backend $1"
+      shift
+      ;;
+  esac
+fi
 
-mkdir -p build
-$cxx $cxxflags src/main.cpp -o build/javakh_cpp $libs
-echo "Built build/javakh_cpp with $backend threading"
+# shellcheck disable=SC2086
+sh "$script_dir/package.sh" $args "$@"

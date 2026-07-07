@@ -1,13 +1,14 @@
 param(
     [ValidateSet("auto", "win32", "pthread", "std", "boost", "single")]
     [string]$Backend = "auto",
-    [string]$Cxx = $(if ($env:CXX) { $env:CXX } else { "g++" }),
+    [string]$Cxx = "",
     [string]$Out = "",
     [string]$Name = "javakh_cpp",
     [switch]$Static,
     [switch]$Native,
     [switch]$NoNative,
     [switch]$Portable,
+    [switch]$Lto,
     [switch]$NoLto,
     [switch]$NoStrip,
     [string]$ExtraCxxFlags = $env:CXXFLAGS,
@@ -15,6 +16,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoParent = Split-Path -Parent $ScriptDir
 
 function Split-Args([string]$s) {
     if ([string]::IsNullOrWhiteSpace($s)) { return @() }
@@ -23,12 +26,12 @@ function Split-Args([string]$s) {
         ForEach-Object { $_.Content }
 }
 
-function Test-Flag([string]$Flag) {
+function Invoke-TestCompile([string[]]$Arguments, [string]$Source = "int main(){return 0;}", [string[]]$PostArguments = @()) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("javakh_cpp_flag_{0}.cpp" -f ([Guid]::NewGuid()))
     $exe = [IO.Path]::ChangeExtension($tmp, ".exe")
-    Set-Content -LiteralPath $tmp -Value "int main(){return 0;}" -Encoding ASCII
+    Set-Content -LiteralPath $tmp -Value $Source -Encoding ASCII
     try {
-        $args = @("-std=c++14", $Flag, $tmp, "-o", $exe)
+        $args = @("-std=c++14") + $Arguments + @($tmp, "-o", $exe) + $PostArguments
         & $Cxx @args *> $null
         return $LASTEXITCODE -eq 0
     } finally {
@@ -37,13 +40,80 @@ function Test-Flag([string]$Flag) {
     }
 }
 
+function Test-Flag([string]$Flag) {
+    return Invoke-TestCompile -Arguments @($Flag)
+}
+
+function Test-Compiler([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $false }
+    try {
+        & $Candidate "--version" *> $null
+        if ($LASTEXITCODE -ne 0) { return $false }
+    } catch {
+        return $false
+    }
+    $oldCxx = $script:Cxx
+    $script:Cxx = $Candidate
+    try { return Invoke-TestCompile -Arguments @() }
+    finally { $script:Cxx = $oldCxx }
+}
+
+function Resolve-Cxx {
+    if (-not [string]::IsNullOrWhiteSpace($Cxx)) {
+        if (Test-Compiler $Cxx) { return $Cxx }
+        throw "C++ compiler '$Cxx' is not usable."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CXX)) {
+        if (Test-Compiler $env:CXX) { return $env:CXX }
+        throw "CXX points to '$env:CXX', but it is not usable."
+    }
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $toolchainRoot = Join-Path $RepoParent "toolchains"
+    if (Test-Path $toolchainRoot) {
+        Get-ChildItem -Path $toolchainRoot -Recurse -Filter "g++.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\mingw64\\bin\\g\+\+\.exe$" } |
+            Sort-Object FullName -Descending |
+            ForEach-Object { $candidates.Add($_.FullName) | Out-Null }
+    }
+    foreach ($name in @("g++", "clang++", "c++")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { $candidates.Add($cmd.Source) | Out-Null }
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Compiler $candidate) { return $candidate }
+    }
+    throw "No usable C++14 compiler found. Install g++ or pass -Cxx <compiler>."
+}
+
+function Test-Backend([string]$Name) {
+    switch ($Name) {
+        "pthread" { return Invoke-TestCompile -Arguments @("-DKH_THREAD_BACKEND_PTHREAD", "-pthread") -Source "#include <pthread.h>`nint main(){pthread_t t; (void)t; return 0;}" }
+        "win32" { return Invoke-TestCompile -Arguments @("-DKH_THREAD_BACKEND_WIN32") -Source "#include <windows.h>`nint main(){CRITICAL_SECTION cs; InitializeCriticalSection(&cs); DeleteCriticalSection(&cs); return 0;}" }
+        "std" { return Invoke-TestCompile -Arguments @("-DKH_THREAD_BACKEND_STD") -Source "#include <thread>`nint main(){return 0;}" }
+        "boost" { return Invoke-TestCompile -Arguments @("-DKH_THREAD_BACKEND_BOOST") -PostArguments @("-lboost_thread", "-lboost_system") -Source "#include <boost/thread.hpp>`nint main(){return 0;}" }
+        "single" { return Invoke-TestCompile -Arguments @("-DKH_THREAD_BACKEND_SINGLE") }
+    }
+    return $false
+}
+
+function Resolve-Backend {
+    if ($Backend -ne "auto") {
+        if (Test-Backend $Backend) { return $Backend }
+        throw "Requested backend '$Backend' is not supported by compiler '$Cxx'."
+    }
+    $order = if ($isWindows) { @("pthread", "win32", "std", "single") } else { @("pthread", "std", "single") }
+    foreach ($candidate in $order) {
+        if (Test-Backend $candidate) { return $candidate }
+    }
+    throw "No supported thread backend found for compiler '$Cxx'."
+}
+
 $isWindows = $PSVersionTable.Platform -eq "Win32NT" -or $env:OS -eq "Windows_NT"
 $platform = if ($isWindows) { "windows" } elseif ($IsMacOS) { "macos" } else { "linux" }
 $exeExt = if ($isWindows) { ".exe" } else { "" }
 
-if ($Backend -eq "auto") {
-    $Backend = if ($isWindows) { "win32" } else { "pthread" }
-}
+$Cxx = Resolve-Cxx
+$Backend = Resolve-Backend
 
 if ([string]::IsNullOrWhiteSpace($Out)) {
     $Out = Join-Path "dist" $platform
@@ -63,7 +133,7 @@ switch ($Backend) {
     "single" { $cxxflags += "-DKH_THREAD_BACKEND_SINGLE" }
 }
 
-if (-not $NoLto -and (Test-Flag "-flto")) {
+if ($Lto -and -not $NoLto -and (Test-Flag "-flto")) {
     $cxxflags += "-flto"
     $ldflags += "-flto"
 }

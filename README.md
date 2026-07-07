@@ -8,16 +8,22 @@ the bundled `org.katlas.JavaKh.JavaKh` classes.
 The project has no mandatory third-party dependency. Threading is selected at
 compile time.
 
+All build and package scripts support no-argument invocation. With no
+arguments, they probe the available compiler and thread backends, then select
+the fastest supported local build mode. User-provided `--cxx`, `--backend`, or
+`CXX` values always override auto-detection.
+
 ### Windows / MinGW
 
 ```bat
-build.bat win32
+build.bat
 ```
 
-This uses the Win32 threading API and works with older MinGW builds whose
-`std::thread` support is missing. It is the default for `build.bat`.
-For performance comparisons with a 64-bit Java VM, use a 64-bit compiler.
-The old MinGW.org `mingw32` compiler produces 32-bit code and is much slower.
+With no arguments, `build.bat` first looks for the bundled WinLibs 64-bit GCC
+under `..\toolchains\`, then falls back to `CXX`, `g++`, `clang++`, or `c++`.
+It probes thread backends in this order: `pthread`, `win32`, `std`, `single`.
+For performance comparisons with a 64-bit Java VM, use a 64-bit compiler. The
+old MinGW.org `mingw32` compiler produces 32-bit code and is much slower.
 
 To install a standalone 64-bit GCC without touching system `PATH`:
 
@@ -32,6 +38,7 @@ file if you want to set `CXX` for the current shell.
 Other Windows choices:
 
 ```bat
+build.bat win32
 build.bat single
 build.bat std
 build.bat pthread
@@ -44,10 +51,12 @@ Boost.Thread and Boost.System libraries.
 ### Linux / macOS / MSYS2
 
 ```sh
-./build.sh pthread
+./build.sh
 ```
 
-This is the POSIX default and links with `-pthread`.
+With no arguments, `build.sh` looks for `CXX`, then `g++`, `clang++`, or `c++`.
+It probes thread backends in this order on POSIX systems: `pthread`, `std`,
+`single`. `pthread` is the preferred POSIX backend and links with `-pthread`.
 
 Other POSIX choices:
 
@@ -78,6 +87,13 @@ The Windows batch output is `build\javakh_cpp.exe`; POSIX script output is
 Use the package scripts when you want an optimized single executable in `dist/`.
 They require only a usable C++ compiler command, normally `g++`. You can choose
 another compiler with `--cxx` or the `CXX` environment variable.
+
+With no arguments, package scripts use the same auto-detection policy as the
+build scripts, add `-O3 -DNDEBUG`, use `-march=native` when supported, and strip
+the result when a compatible `strip` is available. LTO is off by default because
+this project is a single translation unit and the measured fastest benchmark
+build used non-LTO code; pass `--lto` when you want to try it on another
+toolchain.
 
 ### Windows
 
@@ -125,15 +141,16 @@ The default output is `dist/macos/javakh_cpp`.
 --native             add -march=native when supported (default)
 --no-native          disable -march=native for portable binaries
 --portable           same as --no-native
---no-lto             disable automatic -flto probing
+--lto                try -flto
+--no-lto             keep LTO disabled (default)
 --no-strip           keep symbols
 --extra-cxxflags X   append compiler flags
 --extra-ldflags X    append linker flags
 ```
 
-Defaults are optimized for the machine doing the build: `win32` on Windows,
-`pthread` on Linux/macOS, `-O3 -DNDEBUG`, automatic `-flto` when the compiler
-accepts it, `-march=native` when supported, and symbol stripping when `strip` is
+Defaults are optimized for the machine doing the build: auto-detected compiler,
+auto-detected fastest supported backend, `-O3 -DNDEBUG`, `-march=native` when
+supported, LTO off unless requested, and symbol stripping when `strip` is
 available. The package scripts also try `-static-libstdc++` and
 `-static-libgcc` so MinGW/GCC builds are more likely to be a self-contained
 single executable. Use `--portable` when you need to run the executable on older

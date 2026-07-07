@@ -14,7 +14,8 @@ Options:
   --native             Add -march=native when supported (default)
   --no-native          Do not add -march=native
   --portable           Same as --no-native
-  --no-lto             Do not try -flto
+  --lto                Try -flto
+  --no-lto             Do not try -flto (default)
   --no-strip           Do not strip symbols from the final executable
   --extra-cxxflags X   Append extra compiler flags
   --extra-ldflags X    Append extra linker flags
@@ -27,13 +28,15 @@ Environment:
 EOF
 }
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
 backend="auto"
-cxx="${CXX:-g++}"
+cxx="${CXX:-}"
 out=""
 name="javakh_cpp"
 want_static=0
 want_native=1
-want_lto=1
+want_lto=0
 want_strip=1
 extra_cxxflags="${CXXFLAGS:-}"
 extra_ldflags="${LDFLAGS:-}"
@@ -47,6 +50,7 @@ while [ "$#" -gt 0 ]; do
     --static) want_static=1; shift ;;
     --native) want_native=1; shift ;;
     --no-native|--portable) want_native=0; shift ;;
+    --lto) want_lto=1; shift ;;
     --no-lto) want_lto=0; shift ;;
     --no-strip) want_strip=0; shift ;;
     --extra-cxxflags) extra_cxxflags="${extra_cxxflags} $2"; shift 2 ;;
@@ -63,13 +67,6 @@ case "$platform" in
   MINGW*|MSYS*|CYGWIN*) platform_id="windows"; exe_ext=".exe" ;;
   *) platform_id="$(echo "$platform" | tr '[:upper:]' '[:lower:]')"; exe_ext="" ;;
 esac
-
-if [ "$backend" = "auto" ]; then
-  case "$platform_id" in
-    windows) backend="win32" ;;
-    *) backend="pthread" ;;
-  esac
-fi
 
 if [ -z "$out" ]; then
   out="dist/${platform_id}"
@@ -90,6 +87,114 @@ EOF
   # shellcheck disable=SC2086
   $cxx -std=c++14 $flag "$tmpdir/test.cpp" -o "$tmpdir/test.bin" >/dev/null 2>&1
 }
+
+compiler_usable() {
+  candidate="$1"
+  [ -n "$candidate" ] || return 1
+  $candidate --version >/dev/null 2>&1 || return 1
+  cat > "$tmpdir/test.cpp" <<'EOF'
+int main() { return 0; }
+EOF
+  # shellcheck disable=SC2086
+  $candidate -std=c++14 "$tmpdir/test.cpp" -o "$tmpdir/test.bin" >/dev/null 2>&1
+}
+
+choose_compiler() {
+  if [ -n "$cxx" ]; then
+    compiler_usable "$cxx" || {
+      echo "C++ compiler '$cxx' is not usable." >&2
+      exit 1
+    }
+    return
+  fi
+
+  for candidate in "$script_dir"/../toolchains/winlibs-*/mingw64/bin/g++.exe; do
+    if [ -f "$candidate" ] && compiler_usable "$candidate"; then
+      cxx="$candidate"
+      return
+    fi
+  done
+
+  for candidate in g++ clang++ c++; do
+    if command -v "$candidate" >/dev/null 2>&1 && compiler_usable "$candidate"; then
+      cxx="$candidate"
+      return
+    fi
+  done
+
+  echo "No usable C++14 compiler found. Install g++ or pass --cxx <compiler>." >&2
+  exit 1
+}
+
+backend_supported() {
+  candidate="$1"
+  case "$candidate" in
+    pthread)
+      cat > "$tmpdir/test.cpp" <<'EOF'
+#include <pthread.h>
+int main() { pthread_t t; (void)t; return 0; }
+EOF
+      # shellcheck disable=SC2086
+      $cxx -std=c++14 -DKH_THREAD_BACKEND_PTHREAD "$tmpdir/test.cpp" -o "$tmpdir/test.bin" -pthread >/dev/null 2>&1
+      ;;
+    std)
+      cat > "$tmpdir/test.cpp" <<'EOF'
+#include <thread>
+int main() { return 0; }
+EOF
+      # shellcheck disable=SC2086
+      $cxx -std=c++14 -DKH_THREAD_BACKEND_STD "$tmpdir/test.cpp" -o "$tmpdir/test.bin" -pthread >/dev/null 2>&1
+      ;;
+    win32)
+      cat > "$tmpdir/test.cpp" <<'EOF'
+#include <windows.h>
+int main() { CRITICAL_SECTION cs; InitializeCriticalSection(&cs); DeleteCriticalSection(&cs); return 0; }
+EOF
+      # shellcheck disable=SC2086
+      $cxx -std=c++14 -DKH_THREAD_BACKEND_WIN32 "$tmpdir/test.cpp" -o "$tmpdir/test.bin" >/dev/null 2>&1
+      ;;
+    single)
+      cat > "$tmpdir/test.cpp" <<'EOF'
+int main() { return 0; }
+EOF
+      # shellcheck disable=SC2086
+      $cxx -std=c++14 -DKH_THREAD_BACKEND_SINGLE "$tmpdir/test.cpp" -o "$tmpdir/test.bin" >/dev/null 2>&1
+      ;;
+    boost)
+      cat > "$tmpdir/test.cpp" <<'EOF'
+#include <boost/thread.hpp>
+int main() { return 0; }
+EOF
+      # shellcheck disable=SC2086
+      $cxx -std=c++14 -DKH_THREAD_BACKEND_BOOST "$tmpdir/test.cpp" -o "$tmpdir/test.bin" -lboost_thread -lboost_system -pthread >/dev/null 2>&1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+choose_compiler
+
+if [ "$backend" = "auto" ]; then
+  case "$platform_id" in
+    windows) backend_order="pthread win32 std single" ;;
+    *) backend_order="pthread std single" ;;
+  esac
+  for candidate in $backend_order; do
+    if backend_supported "$candidate"; then
+      backend="$candidate"
+      break
+    fi
+  done
+  if [ "$backend" = "auto" ]; then
+    echo "No supported thread backend found for compiler '$cxx'." >&2
+    exit 1
+  fi
+else
+  backend_supported "$backend" || {
+    echo "Requested backend '$backend' is not supported by compiler '$cxx'." >&2
+    exit 1
+  }
+fi
 
 cxxflags="-std=c++14 -O3 -DNDEBUG -Isrc"
 libs=""

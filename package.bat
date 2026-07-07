@@ -3,12 +3,11 @@ setlocal EnableExtensions
 
 set "BACKEND=auto"
 set "CXX=%CXX%"
-if "%CXX%"=="" set "CXX=g++"
 set "OUT="
 set "NAME=javakh_cpp"
 set "WANT_STATIC=0"
 set "WANT_NATIVE=1"
-set "WANT_LTO=1"
+set "WANT_LTO=0"
 set "WANT_STRIP=1"
 set "EXTRA_CXXFLAGS=%CXXFLAGS%"
 set "EXTRA_LDFLAGS=%LDFLAGS%"
@@ -23,6 +22,7 @@ if /I "%~1"=="--static" set "WANT_STATIC=1" & shift & goto parse
 if /I "%~1"=="--native" set "WANT_NATIVE=1" & shift & goto parse
 if /I "%~1"=="--no-native" set "WANT_NATIVE=0" & shift & goto parse
 if /I "%~1"=="--portable" set "WANT_NATIVE=0" & shift & goto parse
+if /I "%~1"=="--lto" set "WANT_LTO=1" & shift & goto parse
 if /I "%~1"=="--no-lto" set "WANT_LTO=0" & shift & goto parse
 if /I "%~1"=="--no-strip" set "WANT_STRIP=0" & shift & goto parse
 if /I "%~1"=="--extra-cxxflags" set "EXTRA_CXXFLAGS=%EXTRA_CXXFLAGS% %~2" & shift & shift & goto parse
@@ -33,7 +33,28 @@ echo Unknown option: %~1
 goto help_error
 
 :parsed
-if /I "%BACKEND%"=="auto" set "BACKEND=win32"
+if "%CXX%"=="" (
+  call :choose_cxx
+  if errorlevel 1 exit /b %errorlevel%
+) else (
+  call :test_compiler
+  if errorlevel 1 (
+    echo C++ compiler "%CXX%" is not usable.
+    exit /b 1
+  )
+)
+
+if /I "%BACKEND%"=="auto" (
+  call :choose_backend
+  if errorlevel 1 exit /b %errorlevel%
+) else (
+  call :test_backend "%BACKEND%"
+  if errorlevel 1 (
+    echo Requested backend "%BACKEND%" is not supported by compiler "%CXX%".
+    exit /b 1
+  )
+)
+
 if "%OUT%"=="" set "OUT=dist\windows"
 if not exist "%OUT%" mkdir "%OUT%"
 set "TARGET=%OUT%\%NAME%.exe"
@@ -100,6 +121,75 @@ if "%WANT_STRIP%"=="1" (
 echo Packaged single executable: %TARGET%
 exit /b 0
 
+:choose_cxx
+for /d %%D in ("%~dp0..\toolchains\winlibs-*") do (
+  if exist "%%~fD\mingw64\bin\g++.exe" (
+    set "CXX=%%~fD\mingw64\bin\g++.exe"
+    call :test_compiler
+    if not errorlevel 1 exit /b 0
+  )
+)
+for %%G in (g++.exe clang++.exe c++.exe) do (
+  where %%G >nul 2>nul
+  if not errorlevel 1 (
+    set "CXX=%%G"
+    call :test_compiler
+    if not errorlevel 1 exit /b 0
+  )
+)
+echo No usable C++14 compiler found. Install g++ or pass --cxx.
+exit /b 1
+
+:choose_backend
+call :test_backend pthread
+if not errorlevel 1 set "BACKEND=pthread" & exit /b 0
+call :test_backend win32
+if not errorlevel 1 set "BACKEND=win32" & exit /b 0
+call :test_backend std
+if not errorlevel 1 set "BACKEND=std" & exit /b 0
+call :test_backend single
+if not errorlevel 1 set "BACKEND=single" & exit /b 0
+echo No supported thread backend found for compiler "%CXX%".
+exit /b 1
+
+:test_compiler
+%CXX% --version >nul 2>nul
+if errorlevel 1 exit /b 1
+call :test_flag
+exit /b %ERRORLEVEL%
+
+:test_backend
+set "PKG_BACKEND=%~1"
+set "PKG_TMP=%TEMP%\javakh_cpp_backend_%RANDOM%.cpp"
+set "PKG_EXE=%TEMP%\javakh_cpp_backend_%RANDOM%.exe"
+if /I "%PKG_BACKEND%"=="pthread" (
+  echo #include ^<pthread.h^>>"%PKG_TMP%"
+  echo int main^(^){return 0;}>>"%PKG_TMP%"
+  %CXX% -std=c++14 -DKH_THREAD_BACKEND_PTHREAD "%PKG_TMP%" -o "%PKG_EXE%" -pthread >nul 2>nul
+) else if /I "%PKG_BACKEND%"=="win32" (
+  echo #include ^<windows.h^>>"%PKG_TMP%"
+  echo int main^(^){return 0;}>>"%PKG_TMP%"
+  %CXX% -std=c++14 -DKH_THREAD_BACKEND_WIN32 "%PKG_TMP%" -o "%PKG_EXE%" >nul 2>nul
+) else if /I "%PKG_BACKEND%"=="std" (
+  echo #include ^<thread^>>"%PKG_TMP%"
+  echo int main^(^){return 0;}>>"%PKG_TMP%"
+  %CXX% -std=c++14 -DKH_THREAD_BACKEND_STD "%PKG_TMP%" -o "%PKG_EXE%" >nul 2>nul
+) else if /I "%PKG_BACKEND%"=="boost" (
+  echo #include ^<boost/thread.hpp^>>"%PKG_TMP%"
+  echo int main^(^){return 0;}>>"%PKG_TMP%"
+  %CXX% -std=c++14 -DKH_THREAD_BACKEND_BOOST "%PKG_TMP%" -o "%PKG_EXE%" -lboost_thread -lboost_system >nul 2>nul
+) else if /I "%PKG_BACKEND%"=="single" (
+  echo int main^(^){return 0;}>"%PKG_TMP%"
+  %CXX% -std=c++14 -DKH_THREAD_BACKEND_SINGLE "%PKG_TMP%" -o "%PKG_EXE%" >nul 2>nul
+) else (
+  del "%PKG_TMP%" >nul 2>nul
+  exit /b 1
+)
+set "PKG_RC=%ERRORLEVEL%"
+del "%PKG_TMP%" >nul 2>nul
+del "%PKG_EXE%" >nul 2>nul
+exit /b %PKG_RC%
+
 :test_flag
 set "PKG_TMP=%TEMP%\javakh_cpp_flag_%RANDOM%.cpp"
 set "PKG_EXE=%TEMP%\javakh_cpp_flag_%RANDOM%.exe"
@@ -122,7 +212,8 @@ echo   --static             Try static linking
 echo   --native             Add -march=native if supported ^(default^)
 echo   --no-native          Do not add -march=native
 echo   --portable           Same as --no-native
-echo   --no-lto             Do not try -flto
+echo   --lto                Try -flto
+echo   --no-lto             Do not try -flto ^(default^)
 echo   --no-strip           Do not strip symbols
 echo   --extra-cxxflags X   Append extra compiler flags
 echo   --extra-ldflags X    Append extra linker flags
