@@ -5,6 +5,7 @@ set "BACKEND=auto"
 set "CXX=%CXX%"
 set "OUT="
 set "NAME=javakh_cpp"
+set "WANT_SHARED=0"
 set "WANT_STATIC=0"
 set "WANT_NATIVE=1"
 set "WANT_LTO=0"
@@ -18,6 +19,7 @@ if /I "%~1"=="--backend" set "BACKEND=%~2" & shift & shift & goto parse
 if /I "%~1"=="--cxx" set "CXX=%~2" & shift & shift & goto parse
 if /I "%~1"=="--out" set "OUT=%~2" & shift & shift & goto parse
 if /I "%~1"=="--name" set "NAME=%~2" & shift & shift & goto parse
+if /I "%~1"=="--shared" set "WANT_SHARED=1" & shift & goto parse
 if /I "%~1"=="--static" set "WANT_STATIC=1" & shift & goto parse
 if /I "%~1"=="--native" set "WANT_NATIVE=1" & shift & goto parse
 if /I "%~1"=="--no-native" set "WANT_NATIVE=0" & shift & goto parse
@@ -57,11 +59,20 @@ if /I "%BACKEND%"=="auto" (
 
 if "%OUT%"=="" set "OUT=dist\windows"
 if not exist "%OUT%" mkdir "%OUT%"
-set "TARGET=%OUT%\%NAME%.exe"
+if "%WANT_SHARED%"=="1" (
+  set "TARGET=%OUT%\%NAME%.dll"
+) else (
+  set "TARGET=%OUT%\%NAME%.exe"
+)
 
 set "CXXFLAGS_ALL=-std=c++14 -O3 -DNDEBUG -Isrc"
 set "LIBS="
 set "LDFLAGS_ALL="
+
+if "%WANT_SHARED%"=="1" (
+  set "CXXFLAGS_ALL=%CXXFLAGS_ALL% -DCPPKH_SHARED_LIBRARY"
+  set "LDFLAGS_ALL=%LDFLAGS_ALL% -shared"
+)
 
 if /I "%BACKEND%"=="win32" (
   set "CXXFLAGS_ALL=%CXXFLAGS_ALL% -DKH_THREAD_BACKEND_WIN32"
@@ -94,13 +105,17 @@ if "%WANT_NATIVE%"=="1" (
   if not errorlevel 1 set "CXXFLAGS_ALL=%CXXFLAGS_ALL% -march=native"
 )
 
-call :test_flag -static-libstdc++
-if not errorlevel 1 set "LDFLAGS_ALL=%LDFLAGS_ALL% -static-libstdc++"
-
-call :test_flag -static-libgcc
-if not errorlevel 1 set "LDFLAGS_ALL=%LDFLAGS_ALL% -static-libgcc"
-
-if "%WANT_STATIC%"=="1" set "LDFLAGS_ALL=%LDFLAGS_ALL% -static"
+if "%WANT_STATIC%"=="1" (
+  if "%WANT_SHARED%"=="1" (
+    echo Warning: --static is ignored when --shared is used.
+  ) else (
+    call :test_flag -static-libstdc++
+    if not errorlevel 1 set "LDFLAGS_ALL=%LDFLAGS_ALL% -static-libstdc++"
+    call :test_flag -static-libgcc
+    if not errorlevel 1 set "LDFLAGS_ALL=%LDFLAGS_ALL% -static-libgcc"
+    set "LDFLAGS_ALL=%LDFLAGS_ALL% -static"
+  )
+)
 
 set "CXXFLAGS_ALL=%CXXFLAGS_ALL% %EXTRA_CXXFLAGS%"
 set "LDFLAGS_ALL=%LDFLAGS_ALL% %EXTRA_LDFLAGS%"
@@ -108,6 +123,7 @@ set "LDFLAGS_ALL=%LDFLAGS_ALL% %EXTRA_LDFLAGS%"
 echo Compiler : %CXX%
 echo Platform : windows
 echo Backend  : %BACKEND%
+if "%WANT_SHARED%"=="1" (echo Kind     : shared library) else (echo Kind     : executable)
 echo Output   : %TARGET%
 
 %CXX% %CXXFLAGS_ALL% src\main.cpp -o "%TARGET%" %LDFLAGS_ALL% %LIBS%
@@ -118,7 +134,27 @@ if "%WANT_STRIP%"=="1" (
   if not errorlevel 1 strip "%TARGET%" >nul 2>nul
 )
 
-echo Packaged single executable: %TARGET%
+if "%WANT_SHARED%"=="1" (
+  call :copy_runtime_deps
+)
+if "%WANT_SHARED%"=="0" if "%WANT_STATIC%"=="0" (
+  call :copy_runtime_deps
+)
+
+if "%WANT_SHARED%"=="1" (
+  echo Packaged shared library: %TARGET%
+) else (
+  echo Packaged executable: %TARGET%
+)
+exit /b 0
+
+:copy_runtime_deps
+where powershell >nul 2>nul
+if errorlevel 1 (
+  echo Warning: powershell was not found; runtime dependencies were not copied.
+  exit /b 0
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\copy_runtime_deps.ps1" -Target "%TARGET%" -Out "%OUT%" -Compiler "%CXX%"
 exit /b 0
 
 :choose_cxx
@@ -141,6 +177,10 @@ echo No usable C++14 compiler found. Install g++ or pass --cxx.
 exit /b 1
 
 :choose_backend
+if "%WANT_SHARED%"=="1" (
+  call :test_backend win32
+  if not errorlevel 1 set "BACKEND=win32" & exit /b 0
+)
 call :test_backend pthread
 if not errorlevel 1 set "BACKEND=pthread" & exit /b 0
 call :test_backend win32
@@ -207,7 +247,8 @@ echo Options:
 echo   --backend NAME       auto, win32, pthread, std, boost, single ^(default: auto^)
 echo   --cxx COMMAND        C++ compiler command ^(default: %%CXX%% or g++^)
 echo   --out DIR            Output directory ^(default: dist\windows^)
-echo   --name NAME          Executable base name ^(default: javakh_cpp^)
+echo   --name NAME          Executable or library base name ^(default: javakh_cpp^)
+echo   --shared             Build a .dll shared library instead of an executable
 echo   --static             Try static linking
 echo   --native             Add -march=native if supported ^(default^)
 echo   --no-native          Do not add -march=native

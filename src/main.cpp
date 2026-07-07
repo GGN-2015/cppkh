@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <dirent.h>
 #include <fstream>
 #include <functional>
@@ -3343,6 +3344,93 @@ static std::string simplifiedPDString(const PDCode& pd) {
 
 } // namespace kh
 
+#if defined(CPPKH_SHARED_LIBRARY)
+#if defined(_WIN32)
+#define CPPKH_API extern "C" __declspec(dllexport)
+#else
+#define CPPKH_API extern "C" __attribute__((visibility("default")))
+#endif
+
+static thread_local std::string g_cppkhLastError;
+
+static char* cppkhDuplicateString(const std::string& value) {
+    char* out = static_cast<char*>(std::malloc(value.size() + 1));
+    if (!out) {
+        g_cppkhLastError = "out of memory";
+        return nullptr;
+    }
+    std::memcpy(out, value.c_str(), value.size() + 1);
+    return out;
+}
+
+struct CppkhOptionsGuard {
+    kh::Options oldOptions;
+    CppkhOptionsGuard() : oldOptions(kh::g_options) {}
+    ~CppkhOptionsGuard() { kh::g_options = oldOptions; }
+};
+
+CPPKH_API const char* cppkh_version() {
+    return "cppkh/1";
+}
+
+CPPKH_API const char* cppkh_last_error() {
+    return g_cppkhLastError.c_str();
+}
+
+CPPKH_API void cppkh_free(char* value) {
+    std::free(value);
+}
+
+CPPKH_API char* cppkh_compute_pd_ex(const char* pd_code, int simplify_pd, int reorder_crossings) {
+    try {
+        g_cppkhLastError.clear();
+        if (!pd_code) throw std::runtime_error("pd_code is null");
+        std::vector<std::pair<std::string, kh::PDCode> > parsed = kh::parsePDDocument(pd_code, "ctypes");
+        if (parsed.empty()) throw std::runtime_error("no PD code found");
+        if (parsed.size() != 1) throw std::runtime_error("cppkh_compute_pd_ex expects exactly one PD code");
+
+        CppkhOptionsGuard guard;
+        kh::g_options.progress = false;
+        kh::g_options.profile = false;
+        kh::g_options.simplifyPD = simplify_pd != 0;
+        kh::g_options.reorderCrossings = reorder_crossings != 0;
+        std::string result = kh::computePD(parsed[0].second);
+        return cppkhDuplicateString(result);
+    } catch (const std::exception& e) {
+        g_cppkhLastError = e.what();
+        return nullptr;
+    } catch (...) {
+        g_cppkhLastError = "unknown error";
+        return nullptr;
+    }
+}
+
+CPPKH_API char* cppkh_compute_pd(const char* pd_code) {
+    return cppkh_compute_pd_ex(pd_code, 1, 1);
+}
+
+CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
+    try {
+        g_cppkhLastError.clear();
+        if (!pd_code) throw std::runtime_error("pd_code is null");
+        std::vector<std::pair<std::string, kh::PDCode> > parsed = kh::parsePDDocument(pd_code, "ctypes");
+        if (parsed.empty()) throw std::runtime_error("no PD code found");
+        if (parsed.size() != 1) throw std::runtime_error("cppkh_simplify_pd expects exactly one PD code");
+        CppkhOptionsGuard guard;
+        kh::g_options.simplifyPD = true;
+        std::string result = kh::simplifiedPDString(parsed[0].second);
+        return cppkhDuplicateString(result);
+    } catch (const std::exception& e) {
+        g_cppkhLastError = e.what();
+        return nullptr;
+    } catch (...) {
+        g_cppkhLastError = "unknown error";
+        return nullptr;
+    }
+}
+#endif
+
+#ifndef CPPKH_SHARED_LIBRARY
 static void usage() {
     std::cout << "Usage: javakh_cpp [--pd-file FILE] [--pd-dir DIR] [--pd-code CODE] [--ordered] [--threads N|auto] [--quiet] [--profile] [--no-simplify-pd] [--print-simplified-pd]\n";
     std::cout << "Thread backend: " << KH_THREAD_BACKEND_NAME << "\n";
@@ -3415,3 +3503,4 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
+#endif

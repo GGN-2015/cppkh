@@ -4,6 +4,7 @@ param(
     [string]$Cxx = "",
     [string]$Out = "",
     [string]$Name = "javakh_cpp",
+    [switch]$Shared,
     [switch]$Static,
     [switch]$Native,
     [switch]$NoNative,
@@ -101,7 +102,13 @@ function Resolve-Backend {
         if (Test-Backend $Backend) { return $Backend }
         throw "Requested backend '$Backend' is not supported by compiler '$Cxx'."
     }
-    $order = if ($isWindows) { @("pthread", "win32", "std", "single") } else { @("pthread", "std", "single") }
+    $order = if ($isWindows -and $Shared) {
+        @("win32", "pthread", "std", "single")
+    } elseif ($isWindows) {
+        @("pthread", "win32", "std", "single")
+    } else {
+        @("pthread", "std", "single")
+    }
     foreach ($candidate in $order) {
         if (Test-Backend $candidate) { return $candidate }
     }
@@ -111,6 +118,7 @@ function Resolve-Backend {
 $isWindows = $PSVersionTable.Platform -eq "Win32NT" -or $env:OS -eq "Windows_NT"
 $platform = if ($isWindows) { "windows" } elseif ($IsMacOS) { "macos" } else { "linux" }
 $exeExt = if ($isWindows) { ".exe" } else { "" }
+$sharedExt = if ($isWindows) { ".dll" } elseif ($platform -eq "macos") { ".dylib" } else { ".so" }
 
 $Cxx = Resolve-Cxx
 $Backend = Resolve-Backend
@@ -119,11 +127,23 @@ if ([string]::IsNullOrWhiteSpace($Out)) {
     $Out = Join-Path "dist" $platform
 }
 New-Item -ItemType Directory -Path $Out -Force | Out-Null
-$target = Join-Path $Out ($Name + $exeExt)
+$targetExt = if ($Shared) { $sharedExt } else { $exeExt }
+if ($Shared -and -not $isWindows -and -not $Name.StartsWith("lib")) {
+    $target = Join-Path $Out ("lib" + $Name + $targetExt)
+} else {
+    $target = Join-Path $Out ($Name + $targetExt)
+}
 
 $cxxflags = @("-std=c++14", "-O3", "-DNDEBUG", "-Isrc")
 $ldflags = @()
 $libs = @()
+
+if ($Shared) {
+    $cxxflags += "-DCPPKH_SHARED_LIBRARY"
+    if (-not $isWindows -and (Test-Flag "-fPIC")) { $cxxflags += "-fPIC" }
+    if ($platform -eq "macos") { $ldflags += "-dynamiclib" }
+    else { $ldflags += "-shared" }
+}
 
 switch ($Backend) {
     "win32" { $cxxflags += "-DKH_THREAD_BACKEND_WIN32" }
@@ -140,17 +160,17 @@ if ($Lto -and -not $NoLto -and (Test-Flag "-flto")) {
 if (-not $NoNative -and -not $Portable -and (Test-Flag "-march=native")) {
     $cxxflags += "-march=native"
 }
-if (Test-Flag "-static-libstdc++") {
-    $ldflags += "-static-libstdc++"
-}
-if (Test-Flag "-static-libgcc") {
-    $ldflags += "-static-libgcc"
-}
 if ($Static) {
-    if ($platform -eq "macos") {
+    if ($Shared) {
+        Write-Warning "--static is ignored when -Shared is used"
+    } elseif ($platform -eq "macos") {
         Write-Warning "--static is not supported by normal macOS toolchains; ignoring"
-    } else {
+    } elseif (Test-Flag "-static") {
+        if (Test-Flag "-static-libstdc++") { $ldflags += "-static-libstdc++" }
+        if (Test-Flag "-static-libgcc") { $ldflags += "-static-libgcc" }
         $ldflags += "-static"
+    } else {
+        Write-Warning "full static linking is not supported by this compiler; continuing with dynamic runtime libraries"
     }
 }
 
@@ -160,6 +180,7 @@ $ldflags += Split-Args $ExtraLdFlags
 Write-Host "Compiler : $Cxx"
 Write-Host "Platform : $platform"
 Write-Host "Backend  : $Backend"
+Write-Host "Kind     : $(if ($Shared) { 'shared library' } else { 'executable' })"
 Write-Host "Output   : $target"
 
 & $Cxx @cxxflags "src/main.cpp" "-o" $target @ldflags @libs
@@ -190,4 +211,17 @@ if (-not $NoStrip) {
     }
 }
 
-Write-Host "Packaged single executable: $target"
+if ($Shared -or -not $Static) {
+    $depScript = Join-Path $ScriptDir "tools\copy_runtime_deps.ps1"
+    if (Test-Path $depScript) {
+        & $depScript -Target $target -Out $Out -Compiler $Cxx
+    } else {
+        Write-Warning "runtime dependency scanner was not found: $depScript"
+    }
+}
+
+if ($Shared) {
+    Write-Host "Packaged shared library: $target"
+} else {
+    Write-Host "Packaged executable: $target"
+}
