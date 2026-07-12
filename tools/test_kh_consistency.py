@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform cppkh vs bundled JavaKh consistency and timing test."""
+"""Cross-platform CppKh, bundled JavaKh, and cppkh-interface consistency test."""
 
 from __future__ import annotations
 
@@ -21,6 +21,38 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = REPO_ROOT / "tests" / "data" / "test_pdcode.txt"
 DEFAULT_LABELS = REPO_ROOT / "tests" / "data" / "test_pdcode.labels.txt"
 DEFAULT_JAVA_ROOT = REPO_ROOT / "reference" / "javakh"
+DEFAULT_CPPKH_INTERFACE_ROOT = REPO_ROOT / "python_project" / "cppkh-interface"
+
+CPPKH_INTERFACE_RUNNER = r"""
+import sys
+import traceback
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[2])
+import cppkh_interface
+
+
+def main():
+    pd_file = Path(sys.argv[1])
+    simplify = sys.argv[3] == "1"
+    threads = sys.argv[4]
+    codes = [line.strip() for line in pd_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    results = cppkh_interface.compute_many_pd(
+        codes,
+        de_r1=simplify,
+        de_k8=simplify,
+        threads=threads,
+    )
+    for result in results:
+        print(f'"{result}"')
+
+
+try:
+    main()
+except Exception:
+    traceback.print_exc(file=sys.stderr)
+    raise SystemExit(1)
+"""
 
 JAVAKH_INTERFACE_RUNNER = r"""
 import re
@@ -481,6 +513,33 @@ def run_javakh_interface(args: argparse.Namespace, pd_file: Path, out_dir: Path)
     }
 
 
+def run_cppkh_interface(args: argparse.Namespace, pd_file: Path, out_dir: Path) -> dict:
+    command = [
+        args.cppkh_interface_python,
+        "-c",
+        CPPKH_INTERFACE_RUNNER,
+        str(pd_file),
+        str(Path(args.cppkh_interface_root).resolve()),
+        "1" if args.no_external_simplify else "0",
+        str(args.threads),
+    ]
+    seconds, code, results = run_process(
+        "cppkh-interface",
+        command,
+        REPO_ROOT,
+        out_dir / "cppkh_interface.out",
+        out_dir / "cppkh_interface.err",
+        args.timeout_sec,
+    )
+    return {
+        "name": "cppkh-interface",
+        "seconds": seconds,
+        "exit_code": code,
+        "results": results,
+        "command": command,
+    }
+
+
 def compare_results(
     runs: Sequence[Tuple[str, List[str]]],
     labels: List[str],
@@ -517,6 +576,16 @@ def compare_results(
     return True, 0
 
 
+def mismatch_count(left: List[str], right: List[str]) -> int:
+    total = max(len(left), len(right))
+    return sum(
+        1
+        for index in range(total)
+        if (left[index] if index < len(left) else "<missing>")
+        != (right[index] if index < len(right) else "<missing>")
+    )
+
+
 def write_summary(out_dir: Path, summary: dict) -> None:
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     lines = [
@@ -533,8 +602,21 @@ def write_summary(out_dir: Path, summary: dict) -> None:
         f"javakh_results: {summary['javakh']['result_count']}",
         f"cppkh_javakh_full_match: {summary['cppkh_javakh_full_match']}",
         f"cppkh_javakh_full_mismatches: {summary['cppkh_javakh_full_mismatches']}",
+        f"core_full_match: {summary['core_full_match']}",
+        f"core_full_mismatches: {summary['core_full_mismatches']}",
         f"match: {summary['match']}",
     ]
+    cppkh_interface = summary.get("cppkh_interface")
+    if cppkh_interface:
+        lines.extend(
+            [
+                f"cppkh_interface_seconds: {cppkh_interface['seconds']:.6f}",
+                f"cppkh_interface_exit: {cppkh_interface['exit_code']}",
+                f"cppkh_interface_results: {cppkh_interface['result_count']}",
+            ]
+        )
+    else:
+        lines.append("cppkh_interface: disabled")
     javakh_interface = summary.get("javakh_interface")
     if javakh_interface:
         sample = javakh_interface["sample"]
@@ -548,6 +630,7 @@ def write_summary(out_dir: Path, summary: dict) -> None:
                 f"javakh_interface_results: {javakh_interface['result_count']}",
                 f"javakh_interface_sample_match: {javakh_interface['sample_match']}",
                 f"javakh_interface_sample_mismatches: {javakh_interface['sample_mismatches']}",
+                f"javakh_interface_match_is_informational: {javakh_interface.get('match_is_informational', False)}",
             ]
         )
     else:
@@ -565,8 +648,8 @@ def write_summary(out_dir: Path, summary: dict) -> None:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare cppkh and bundled JavaKh on a PD-code collection, with an optional "
-            "fixed-size PyPI javakh-interface sample check."
+            "Compare cppkh, bundled JavaKh, and local cppkh-interface on a PD-code collection, "
+            "with an optional informational PyPI javakh-interface sample check."
         )
     )
     parser.add_argument("--input", default=str(DEFAULT_INPUT), help="PD-code file. Lines may be PD[...] or label: [[...]].")
@@ -577,6 +660,21 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--java", default="java", help="Java command.")
     parser.add_argument("--javac", default="javac", help="javac command used for the batch runner.")
     parser.add_argument("--java-xmx", default="4g", help="Java maximum heap, for example 4g or 16384m.")
+    parser.add_argument(
+        "--cppkh-interface-python",
+        default=sys.executable,
+        help="Python executable used for the local cppkh-interface full comparison.",
+    )
+    parser.add_argument(
+        "--cppkh-interface-root",
+        default=str(DEFAULT_CPPKH_INTERFACE_ROOT),
+        help="Source checkout of the local cppkh-interface package.",
+    )
+    parser.add_argument(
+        "--skip-cppkh-interface",
+        action="store_true",
+        help="Skip the local cppkh-interface full comparison.",
+    )
     parser.add_argument(
         "--javakh-interface-python",
         default="",
@@ -624,6 +722,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"input     : {Path(args.input).resolve()}")
     print(f"cppkh     : {cpp_exe}")
     print(f"JavaKh    : {java_root}")
+    if args.skip_cppkh_interface:
+        print("CppPy iface: disabled")
+    else:
+        print(f"CppPy iface: {args.cppkh_interface_python} ({Path(args.cppkh_interface_root).resolve()})")
     if args.javakh_interface_python:
         print(
             f"PyPI iface: {args.javakh_interface_python} "
@@ -654,17 +756,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     )
 
+    cppkh_interface_run = None
+    if not args.skip_cppkh_interface:
+        print("stage     : run local cppkh-interface")
+        cppkh_interface_run = run_cppkh_interface(args, pd_file, out_dir)
+        print(
+            "CppPy iface: {0:.3f}s, exit={1}, results={2}".format(
+                cppkh_interface_run["seconds"],
+                cppkh_interface_run["exit_code"],
+                len(cppkh_interface_run["results"]),
+            )
+        )
+
+    full_runs = [
+        ("cppkh", cpp_run["results"]),
+        ("JavaKh", java_run["results"]),
+    ]
+    if cppkh_interface_run:
+        full_runs.append(("cppkh-interface", cppkh_interface_run["results"]))
     full_match, full_mismatches = compare_results(
-        [
-            ("cppkh", cpp_run["results"]),
-            ("JavaKh", java_run["results"]),
-        ],
+        full_runs,
         labels,
         out_dir,
         args.max_show_mismatches,
-        report_name="cppkh_javakh_mismatches.txt",
-        prefix="full compare",
+        report_name="core_mismatches.txt",
+        prefix="core compare",
     )
+    cppkh_javakh_mismatches = mismatch_count(cpp_run["results"], java_run["results"])
 
     javakh_interface_run = None
     javakh_interface_match = True
@@ -709,7 +827,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             out_dir,
             args.max_show_mismatches,
             report_name="javakh_interface_sample_mismatches.txt",
-            prefix="sample compare",
+            prefix="informational sample compare",
         )
 
     if cpp_run["seconds"] > 0:
@@ -721,7 +839,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"timing    : javakh-interface sample avg / cppkh full avg = {iface_avg / cpp_avg:.3f}x")
     print(f"summary   : {out_dir / 'summary.txt'}")
 
-    match = full_match and javakh_interface_match
+    # PyPI javakh-interface still bundles the legacy JavaKh sign algorithm.
+    # Record its differences, but only the patched CppKh/JavaKh pair gates this
+    # runner until that external package is updated.
+    match = full_match
     summary = {
         "input": str(Path(args.input).resolve()),
         "prepared_pd_file": str(pd_file),
@@ -746,9 +867,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "runner": java_run.get("runner", "unknown"),
         },
         "match": match,
-        "cppkh_javakh_full_match": full_match,
-        "cppkh_javakh_full_mismatches": full_mismatches,
+        "cppkh_javakh_full_match": cppkh_javakh_mismatches == 0,
+        "cppkh_javakh_full_mismatches": cppkh_javakh_mismatches,
+        "core_full_match": full_match,
+        "core_full_mismatches": full_mismatches,
     }
+    if cppkh_interface_run:
+        summary["cppkh_interface"] = {
+            "python": args.cppkh_interface_python,
+            "root": str(Path(args.cppkh_interface_root).resolve()),
+            "seconds": cppkh_interface_run["seconds"],
+            "average_seconds": cppkh_interface_run["seconds"] / count if count else 0.0,
+            "exit_code": cppkh_interface_run["exit_code"],
+            "result_count": len(cppkh_interface_run["results"]),
+            "command": cppkh_interface_run["command"],
+        }
     if javakh_interface_run and javakh_interface_sample:
         sample_count = javakh_interface_sample["count"]
         summary["javakh_interface"] = {
@@ -761,10 +894,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "sample": javakh_interface_sample,
             "sample_match": javakh_interface_match,
             "sample_mismatches": javakh_interface_mismatches,
+            "match_is_informational": True,
         }
     write_summary(out_dir, summary)
 
     if cpp_run["exit_code"] != 0 or java_run["exit_code"] != 0 or not match:
+        return 1
+    if cppkh_interface_run and cppkh_interface_run["exit_code"] != 0:
         return 1
     if javakh_interface_run and javakh_interface_run["exit_code"] != 0:
         return 1

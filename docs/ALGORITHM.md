@@ -9,6 +9,20 @@ then formats the resulting homology in JavaKh-compatible notation.
 PD codes are parsed into zero-based arc labels internally. A valid PD code must
 have four entries per crossing and every arc label must occur exactly twice.
 
+### Oriented crossing signs
+
+Crossing signs follow the SageMath PD convention. For `X[a,b,c,d]`, `a` is the
+incoming under-edge and `c` is the outgoing under-edge. `cppkh` propagates that
+orientation through matching edge incidences and opposite slots at every
+crossing. Components which never pass under are oriented deterministically from
+their lowest-labelled unassigned edge. The sign is then determined from the
+actual incoming/outgoing over-edge incidence, including repeated-label R1
+crossings.
+
+This preprocessing is linear in the number of crossings. It does not compare
+the numeric values of `b` and `d`, so arc relabelling cannot change the signs.
+The bundled JavaKh patch uses the same traversal in `PDOrientation.java`.
+
 By default, `cppkh` simplifies the diagram before constructing the Khovanov
 complex:
 
@@ -17,6 +31,10 @@ complex:
 3. Detect nugatory crossings by removing one crossing and checking whether the
    underlying incidence graph gains a connected component.
 4. Splice out each detected nugatory crossing and renumber again.
+
+Signs are computed on the original oriented PD code and carried alongside
+surviving crossings during simplification. Renumbering therefore cannot reverse
+a component or change a surviving crossing sign.
 
 This is a diagram-level simplification. It reduces the input before the complex
 is built. It is separate from the algebraic simplification of the Khovanov
@@ -102,6 +120,19 @@ The main compatibility runner is:
 python tools/test_kh_consistency.py --javakh-interface-python path/to/python
 ```
 
-It compares `cppkh` and the bundled patched JavaKh on the selected input, then
-checks the PyPI `javakh-interface` package on a deterministic random sample.
-The default `javakh-interface` sample size is 100 with seed `20260712`.
+It requires `cppkh`, bundled patched JavaKh, and local `cppkh-interface` to
+match on the selected input, then checks the PyPI `javakh-interface` package on
+a deterministic random sample.
+The default `javakh-interface` sample size is 100 with seed `20260712`. Since
+that external package still bundles legacy JavaKh, its differences are
+informational and do not determine the runner's exit status.
+
+The focused orientation regression is:
+
+```sh
+python tools/test_pd_orientation.py --cpp-exe path/to/cppkh
+```
+
+It checks SageMath-derived crossing signs, invariance under arc relabelling,
+and matching homology from CppKh, bundled JavaKh, and the local
+`cppkh-interface` package.

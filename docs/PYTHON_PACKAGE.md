@@ -148,6 +148,10 @@ those simplifications. Mixed values are still supported for single-code calls
 through Python preprocessing, matching the compatibility behavior of
 `javakh-interface`.
 
+Crossing signs use the same directed-edge traversal as SageMath and the bundled
+JavaKh patch. Because the package compiles the repository's `src/main.cpp`, no
+separate Python sign implementation is involved.
+
 ## Batch API
 
 Use `solve_many_khovanov` or `compute_many_pd` to process many PD codes through

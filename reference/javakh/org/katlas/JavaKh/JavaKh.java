@@ -30,6 +30,7 @@ public class JavaKh {
     public static void main(String[] args) throws IOException {
         boolean reorderCrossings = true;
         boolean useDiskCache = true;
+        boolean printCrossingSigns = false;
         String inputPath = "PD.txt";
 
         try {
@@ -60,6 +61,9 @@ public class JavaKh {
             if (commandLine.hasOption("G")) {
                 Komplex.intenseGarbage = true;
             }
+            if (commandLine.hasOption("S")) {
+                printCrossingSigns = true;
+            }
             if (commandLine.hasOption("f")) {
                 inputPath = commandLine.getOptionValue("f");
             } else if (commandLine.getArgs().length > 0) {
@@ -87,9 +91,14 @@ public class JavaKh {
                 if (pd == null) {
                     throw new IllegalArgumentException("could not parse PD code");
                 }
+                int[] signs = PDOrientation.getSigns(pd);
+                if (printCrossingSigns) {
+                    System.out.println(PDOrientation.formatSigns(signs));
+                    continue;
+                }
                 Komplex<?> komplex = Komplex.generateFast(
                     pd,
-                    Komplex.getSigns(pd),
+                    signs,
                     reorderCrossings,
                     useDiskCache,
                     inMemory
@@ -125,6 +134,7 @@ public class JavaKh {
         options.addOption("N", "nocobordisms", false, "disable the cobordism cache");
         options.addOption("P", "parallel", false, "simplify complexes using parallel threads (experimental)");
         options.addOption("G", "garbage", false, "perform intense garbage collection");
+        options.addOption("S", "print-crossing-signs", false, "print SageMath-compatible crossing signs");
         return options;
     }
 

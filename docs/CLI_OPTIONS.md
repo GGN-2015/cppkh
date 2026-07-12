@@ -45,6 +45,7 @@ benchmark helper.
 --no-simplify-pd        Disable default PD simplification.
 --raw-pd                Alias for --no-simplify-pd.
 --print-simplified-pd   Print the simplified PD code instead of homology.
+--print-crossing-signs  Print SageMath-compatible crossing signs instead of homology.
 --help, -h              Show CLI help.
 ```
 
@@ -61,6 +62,10 @@ Use `--no-simplify-pd` only when the input has already been simplified outside
 `cppkh`. For JavaKh comparisons, the benchmark script can run the external
 Python simplifiers first and then pass `--no-simplify-pd` to `cppkh`, ensuring
 both programs receive the same simplified PD code.
+
+Crossing signs are resolved from directed edge incidences before simplification
+and remain attached to surviving crossings. They do not depend on arc-label
+ordering.
 
 See [Algorithm Notes](ALGORITHM.md) for the distinction between diagram-level
 PD simplification and algebraic Khovanov-complex reduction.

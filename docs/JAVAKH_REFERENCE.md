@@ -12,24 +12,31 @@ checks. The normal `cppkh` executable does not require Java.
 ## Patched Entry Point
 
 The bundled `org.katlas.JavaKh.JavaKh` class is patched from the original
-JavaKh entry point in three ways:
+JavaKh entry point in four ways:
 
 - It reads input files one PD code per non-empty line.
 - It accepts an input path from the command line.
 - If one PD code fails, it prints a single-line error and continues with later
   PD codes.
+- It resolves crossing signs by tracing directed PD edge incidences with the
+  same convention as SageMath instead of comparing `b` and `d` numerically.
 
 The patched source is kept at:
 
 ```text
 reference/javakh/org/katlas/JavaKh/JavaKh.java
+reference/javakh/org/katlas/JavaKh/PDOrientation.java
 ```
 
 The compiled Java 8-compatible class file is:
 
 ```text
 reference/javakh/org/katlas/JavaKh/JavaKh.class
+reference/javakh/org/katlas/JavaKh/PDOrientation.class
 ```
+
+Pass `--print-crossing-signs` / `-S` to print the resolved sign list for each
+input instead of constructing its Khovanov complex.
 
 ## Running JavaKh Directly
 

@@ -1,10 +1,12 @@
-# Testing cppkh Against JavaKh
+# Testing CppKh, JavaKh, And Python Interfaces
 
 `tools/test_kh_consistency.py` is the cross-platform consistency and timing
-test runner. It compares `cppkh` against the bundled JavaKh reference runtime
-in `reference/javakh/` on the selected input. When
+test runner. It requires `cppkh`, the bundled patched JavaKh, and the local
+`cppkh-interface` package to match on every selected input. When
 `--javakh-interface-python` is supplied, it also checks the PyPI
-`javakh-interface` package on a deterministic random sample.
+`javakh-interface` package on a deterministic random sample. That package still
+bundles the legacy JavaKh crossing-sign algorithm, so its mismatches are
+reported for reference but do not fail the test run.
 
 See [Bundled JavaKh Reference](JAVAKH_REFERENCE.md) for direct JavaKh usage.
 
@@ -55,7 +57,9 @@ PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]
 - Python 3.
 - A built `cppkh` executable, or pass `--build-cpp`.
 - A Java runtime available as `java`.
+- The local `cppkh-interface` dependencies installed in the runner's Python.
 - A JDK with `javac` is only needed for `--java-runner batch`.
+- A JDK with `javac` is required by the focused PD-orientation regression.
 - Optional: the PyPI `javakh-interface` package installed in the Python used by
   `--javakh-interface-python`.
 - For default preprocessing, install the external simplifiers:
@@ -81,6 +85,28 @@ Same command on Windows, Linux, and macOS:
 ```sh
 python tools/test_kh_consistency.py --build-cpp --limit 10
 ```
+
+## PD Orientation Regression
+
+After building `cppkh`, run:
+
+```sh
+python tools/test_pd_orientation.py --cpp-exe path/to/cppkh
+```
+
+The cases in `tests/data/pd_orientation_cases.json` include SageMath link
+examples where comparing the numeric `b` and `d` labels gives incorrect signs,
+an equivalent arbitrarily relabelled PD code, and both repeated-label R1 sign
+forms. The runner checks:
+
+- CppKh and JavaKh signs against the expected SageMath signs.
+- CppKh and JavaKh homology equality on computable raw diagrams.
+- The local `cppkh-interface` package against the same CppKh output.
+- Homology invariance under arc relabelling.
+
+Use `--skip-python-interface` when testing only the two native runtimes.
+Pass `--cpp-library path/to/cppkh.dll` (or `.so` / `.dylib`) to include the
+ctypes wrapper in the same homology comparison.
 
 The runner prints stage timings:
 
@@ -117,8 +143,8 @@ python tools/test_kh_consistency.py --javakh-interface-python path/to/python --l
 
 ## 10_3 Link Set
 
-Run the dedicated cppkh and bundled JavaKh consistency check for the normalized
-10_3 link PD set:
+Run the dedicated three-way core consistency check for the normalized 10_3
+link PD set:
 
 ```sh
 python tools/test_10_3_links_consistency.py --build-cpp
@@ -142,8 +168,9 @@ python tools/test_10_3_links_consistency.py --javakh-interface-python path/to/py
 ```
 
 With `--javakh-interface-python`, the wrapper uses the same deterministic
-sample policy as `test_kh_consistency.py`: full `cppkh`/JavaKh comparison,
-then a PyPI `javakh-interface` sample check.
+sample policy as `test_kh_consistency.py`: full CppKh/bundled-JavaKh/
+`cppkh-interface` comparison, then an informational PyPI `javakh-interface`
+sample check.
 
 ## cppkh-interface Timing
 
@@ -204,6 +231,11 @@ seed `20260712`.
 --java COMMAND            Java command, default: java.
 --javac COMMAND           javac command for the batch runner.
 --java-xmx SIZE           Java heap, default: 4g.
+--cppkh-interface-python PY
+                          Python executable for local cppkh-interface checks.
+--cppkh-interface-root DIR
+                          Source checkout of the local cppkh-interface package.
+--skip-cppkh-interface    Skip the local Python interface comparison.
 --javakh-interface-python PY
                           Optional Python executable with PyPI javakh-interface.
 --javakh-interface-sample-size N
@@ -256,7 +288,9 @@ cppkh.out                             Raw cppkh stdout.
 cppkh.err                             Raw cppkh stderr.
 javakh.out                            Raw JavaKh stdout.
 javakh.err                            Raw JavaKh stderr.
-cppkh_javakh_mismatches.txt           Written only when full outputs differ.
+cppkh_interface.out                   Raw local cppkh-interface stdout.
+cppkh_interface.err                   Raw local cppkh-interface stderr.
+core_mismatches.txt                   Written only when the three core outputs differ.
 javakh_interface_sample.pd            Optional PyPI sample PD codes.
 javakh_interface_sample.indices.txt   Optional 1-based sample indices.
 javakh_interface_sample_mismatches.txt
@@ -265,5 +299,7 @@ summary.txt                           Human-readable timing and result summary.
 summary.json                          Machine-readable summary.
 ```
 
-The script exits with status `0` only when full `cppkh`/JavaKh comparison
-succeeds and the optional PyPI sample comparison also succeeds.
+The script exits with status `0` when the enabled core implementations match
+and their processes succeed. PyPI `javakh_interface` output differences are
+informational because that package still embeds the legacy JavaKh algorithm;
+failure to execute the requested sample still returns a nonzero status.
