@@ -39,10 +39,10 @@ RUNTIME_ROWS = [
     {
         "label": "Full 8397",
         "items": 8397,
-        "cppkh_seconds": 64.658645,
-        "cppkh_interface_seconds": 64.944292,
-        "javakh_seconds": 299.233587,
-        "javakh_interface_seconds": 29.435682,
+        "cppkh_seconds": 64.185450,
+        "cppkh_interface_seconds": 65.405585,
+        "javakh_seconds": 298.452713,
+        "javakh_interface_seconds": 29.185234,
         "javakh_interface_items": 50,
     },
 ]
@@ -51,10 +51,10 @@ RUNTIME_ROWS = [
 # Filled from a full 8397-case process-memory run with
 # tools/measure_peak_memory.py. Values are peak RSS measurements in MiB.
 MEMORY_MIB = {
-    "cppkh_peak_rss": 26.05859375,
-    "cppkh_interface_peak_rss": 347.16796875,
-    "javakh_peak_rss": 490.4921875,
-    "javakh_interface_peak_rss": 159.0234375,
+    "cppkh_peak_rss": 26.046875,
+    "cppkh_interface_peak_rss": 60.2265625,
+    "javakh_peak_rss": 491.55078125,
+    "javakh_interface_peak_rss": 161.19140625,
 }
 
 JAVAKH_INTERFACE_SAMPLE_SIZE = 50

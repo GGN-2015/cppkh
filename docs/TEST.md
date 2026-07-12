@@ -154,9 +154,9 @@ already prepared PD file:
 
 ```sh
 python tools/benchmark_cppkh_interface.py \
-  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-010/prepared.pd \
-  --expected-out benchmark/triad-full8397-javakh-interface-sample50-010/cppkh.out \
-  --out benchmark/cppkh-interface-full8397-sample50-run.json
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-011/prepared.pd \
+  --expected-out benchmark/triad-full8397-javakh-interface-sample50-011/cppkh.out \
+  --out benchmark/cppkh-interface-full8397-sample50-011.json
 ```
 
 The script selects a 64-bit benchmark compiler when one is available. Override
@@ -178,13 +178,13 @@ Measure process-tree RSS for the full-input front ends plus a PyPI
 
 ```sh
 python tools/measure_peak_memory.py \
-  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-010/prepared.pd \
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-011/prepared.pd \
   --cpp-exe dist/windows/cppkh.exe \
   --cppkh-interface-python path/to/python-with-cppkh-interface \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache \
   --javakh-interface-python path/to/python-with-javakh-interface \
   --javakh-interface-sample-size 50 \
-  --out benchmark/memory-full8397-javakh-interface-sample50-010.json
+  --out benchmark/memory-full8397-javakh-interface-sample50-011.json
 ```
 
 The `cppkh-interface` memory row includes the Python wrapper plus its child
