@@ -30,6 +30,16 @@ The converter removed original prefixes such as `0000001.txt:` and
 `[K3a1|...]`, then added `PD` and `X` wrappers. Original labels are preserved in
 `tests/data/test_pdcode.labels.txt`.
 
+The 10_3 link set is also normalized under:
+
+```text
+tests/data/pd_codes_10_3_links.txt
+tests/data/pd_codes_10_3_links.labels.txt
+```
+
+It was converted from `pd_codes_10_3.txt`, where each source line has the
+original label before `:` and the PD payload after `:`.
+
 The test script can also read raw files with these forms:
 
 ```text
@@ -84,6 +94,31 @@ Useful slices:
 python tools/test_kh_consistency.py --limit 1000 --out-dir benchmark/first1000
 python tools/test_kh_consistency.py --last 1000 --out-dir benchmark/last1000
 python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark/com100
+```
+
+## 10_3 Link Set
+
+Run the dedicated cppkh-vs-JavaKh consistency check for the normalized 10_3
+link PD set:
+
+```sh
+python tools/test_10_3_links_consistency.py --build-cpp
+```
+
+The wrapper defaults to:
+
+```text
+input : tests/data/pd_codes_10_3_links.txt
+labels: tests/data/pd_codes_10_3_links.labels.txt
+out   : benchmark/links-10-3-consistency
+```
+
+It accepts the same slicing and runtime options as `test_kh_consistency.py`, for
+example:
+
+```sh
+python tools/test_10_3_links_consistency.py --limit 100
+python tools/test_10_3_links_consistency.py --start 1001 --limit 500 --java-xmx 8g
 ```
 
 ## cppkh-interface Timing
