@@ -107,6 +107,6 @@ If you use `cppkh` in academic work, please cite this repository:
   title   = {{cppkh}: A C++ implementation of the JavaKh Khovanov homology computation path},
   year    = {2026},
   url     = {https://github.com/GGN-2015/cppkh},
-  version = {0.1.1}
+  version = {0.1.2}
 }
 ```

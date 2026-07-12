@@ -1,6 +1,6 @@
 [project]
 name = "cppkh-interface"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python interface for cppkh Khovanov homology computation with runtime C++ compilation."
 authors = [
     {name = "GGN_2015", email = "neko@jlulug.org"}

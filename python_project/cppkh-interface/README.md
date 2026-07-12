@@ -3,6 +3,10 @@
 `cppkh-interface` is a Python package for computing integer Khovanov homology
 with the C++ `cppkh` implementation.
 
+Version `0.1.2` resolves link crossing signs by tracing directed PD edge
+incidences with the SageMath convention. It does not infer signs from numeric
+arc-label ordering.
+
 The package is compatible with the main `javakh-interface` function:
 
 ```python
