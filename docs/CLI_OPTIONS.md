@@ -62,6 +62,9 @@ Use `--no-simplify-pd` only when the input has already been simplified outside
 Python simplifiers first and then pass `--no-simplify-pd` to `cppkh`, ensuring
 both programs receive the same simplified PD code.
 
+See [Algorithm Notes](ALGORITHM.md) for the distinction between diagram-level
+PD simplification and algebraic Khovanov-complex reduction.
+
 ## Output
 
 For one PD code, the CLI prints one quoted polynomial:

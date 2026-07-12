@@ -98,6 +98,7 @@ copied beside it.
 
 - [Build and packaging options](docs/BUILD_AND_PACKAGING.md)
 - [Command-line options](docs/CLI_OPTIONS.md)
+- [Algorithm notes](docs/ALGORITHM.md)
 - [Python ctypes interface](docs/PYTHON_CTYPES.md)
 - [cppkh-interface Python package](docs/PYTHON_PACKAGE.md)
 - [Testing against JavaKh](docs/TEST.md)

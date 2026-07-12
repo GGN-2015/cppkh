@@ -2760,6 +2760,9 @@ std::string Komplex::KhForZ() {
 
 static int chooseXingRecursive(const std::vector<int>& edges, const std::vector<std::vector<int> >& pd,
                                std::vector<char>& in, std::vector<char>& done, int depth, std::vector<int>& retmax) {
+    // Choose the next crossing for the growing tangle. The heuristic maximizes
+    // already-attached boundary arcs, with a short lookahead to keep later
+    // intermediate girth smaller. It affects runtime, not the homology result.
     int nedges = static_cast<int>(edges.size());
     int best = -1, nconbest = -1;
     std::vector<int> rbest(depth, 0);
@@ -3132,6 +3135,8 @@ static Komplex generateFast(const std::vector<std::vector<int> >& pd, const std:
     std::vector<std::vector<int> > pd1(1, std::vector<int>{0,1,2,3});
     Komplex kplus(pd1, std::vector<int>{1}, 4);
     Komplex kminus(pd1, std::vector<int>{-1}, 4);
+    // Build the full complex by composing one crossing complex at a time and
+    // reducing after every composition, following JavaKh's tangle-growth path.
     std::vector<int> edges;
     int firstdepth = pd.size() > 4 ? 3 : static_cast<int>(pd.size()) - 1;
     std::vector<int> firstdummy(firstdepth + 1, 0);
