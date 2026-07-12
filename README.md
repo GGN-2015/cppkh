@@ -64,15 +64,17 @@ R1-move removal and then nugatory-crossing removal are enabled by default.
 
 ## Performance Snapshot
 
-On the full 8397-case benchmark, both C++ paths matched every bundled JavaKh
-result. `cppkh` finished in `61.596s`, `cppkh-interface` batch API finished in
-`61.392s` after its executable was already cached, and the patched bundled
-JavaKh native multiline runner finished in `466.562s`. That is a `7.575x`
-Java/cppkh speedup and a `7.600x` Java/cppkh-interface speedup.
+On the full 8397-case benchmark, `cppkh` and the patched bundled JavaKh
+matched every result. `cppkh` finished in `64.659s`, `cppkh-interface` batch
+API finished in `64.944s` after its executable was already cached, and the
+patched bundled JavaKh native multiline runner finished in `299.234s`. The
+PyPI `javakh-interface` package was checked on a deterministic random
+50-case sample and averaged `0.589s` per PD code.
 
-Peak RSS on the same prepared full input was `26.04 MiB` for `cppkh`,
-`68.08 MiB` for `cppkh-interface` including Python plus the child executable,
-and `453.57 MiB` for patched JavaKh.
+Peak RSS on the same prepared full input was `26.06 MiB` for `cppkh`,
+`347.17 MiB` for `cppkh-interface` as a Python batch API call, and
+`490.49 MiB` for patched JavaKh. The PyPI `javakh-interface` 50-case sample
+peaked at `159.02 MiB`.
 
 ![cppkh benchmark runtime and memory chart](docs/assets/benchmark_runtime_memory.png)
 

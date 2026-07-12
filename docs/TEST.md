@@ -2,7 +2,9 @@
 
 `tools/test_kh_consistency.py` is the cross-platform consistency and timing
 test runner. It compares `cppkh` against the bundled JavaKh reference runtime
-in `reference/javakh/`.
+in `reference/javakh/` on the selected input. When
+`--javakh-interface-python` is supplied, it also checks the PyPI
+`javakh-interface` package on a deterministic random sample.
 
 See [Bundled JavaKh Reference](JAVAKH_REFERENCE.md) for direct JavaKh usage.
 
@@ -54,10 +56,19 @@ PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]
 - A built `cppkh` executable, or pass `--build-cpp`.
 - A Java runtime available as `java`.
 - A JDK with `javac` is only needed for `--java-runner batch`.
+- Optional: the PyPI `javakh-interface` package installed in the Python used by
+  `--javakh-interface-python`.
 - For default preprocessing, install the external simplifiers:
 
 ```sh
 python -m pip install pd-code-de-r1 pd-code-delete-nugatory
+```
+
+Install PyPI `javakh-interface` only in the environment used for the optional
+sample check:
+
+```sh
+python -m pip install javakh-interface
 ```
 
 Pass `--no-external-simplify` to test raw PD codes without the R1 then nugatory
@@ -77,7 +88,7 @@ The runner prints stage timings:
 prepared  : 10 cases in 0.018s
 cppkh     : 0.012s, exit=0, results=10
 JavaKh    : 0.812s, exit=0, results=10, runner=native
-compare: OK
+full compare: OK
 ```
 
 ## Full Test
@@ -96,10 +107,18 @@ python tools/test_kh_consistency.py --last 1000 --out-dir benchmark/last1000
 python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark/com100
 ```
 
+To include the PyPI `javakh-interface` sample check, pass the Python executable
+for the environment where the package is installed. The default sample size is
+50; use `--javakh-interface-sample-size` to override it.
+
+```sh
+python tools/test_kh_consistency.py --javakh-interface-python path/to/python --limit 100
+```
+
 ## 10_3 Link Set
 
-Run the dedicated cppkh-vs-JavaKh consistency check for the normalized 10_3
-link PD set:
+Run the dedicated cppkh and bundled JavaKh consistency check for the normalized
+10_3 link PD set:
 
 ```sh
 python tools/test_10_3_links_consistency.py --build-cpp
@@ -119,7 +138,12 @@ example:
 ```sh
 python tools/test_10_3_links_consistency.py --limit 100
 python tools/test_10_3_links_consistency.py --start 1001 --limit 500 --java-xmx 8g
+python tools/test_10_3_links_consistency.py --javakh-interface-python path/to/python --limit 100
 ```
+
+With `--javakh-interface-python`, the wrapper uses the same deterministic
+sample policy as `test_kh_consistency.py`: full `cppkh`/JavaKh comparison,
+then a PyPI `javakh-interface` sample check.
 
 ## cppkh-interface Timing
 
@@ -130,9 +154,9 @@ already prepared PD file:
 
 ```sh
 python tools/benchmark_cppkh_interface.py \
-  --prepared-pd benchmark/triad-full8397-011/prepared.pd \
-  --expected-out benchmark/triad-full8397-011/cppkh.out \
-  --out benchmark/cppkh-interface-full8397.json
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-010/prepared.pd \
+  --expected-out benchmark/triad-full8397-javakh-interface-sample50-010/cppkh.out \
+  --out benchmark/cppkh-interface-full8397-sample50-run.json
 ```
 
 The script selects a 64-bit benchmark compiler when one is available. Override
@@ -149,21 +173,25 @@ python tools/benchmark_cppkh_interface.py --last 1000 --out benchmark/cppkh-inte
 
 ## Memory Test
 
-Measure full-input process-tree RSS for all three front ends:
+Measure process-tree RSS for the full-input front ends plus a PyPI
+`javakh-interface` sample:
 
 ```sh
 python tools/measure_peak_memory.py \
-  --prepared-pd benchmark/triad-full8397-011/prepared.pd \
-  --cpp-exe benchmark/bench-triad-cpp/cppkh.exe \
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-010/prepared.pd \
+  --cpp-exe dist/windows/cppkh.exe \
   --cppkh-interface-python path/to/python-with-cppkh-interface \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache \
-  --cppkh-interface-cxx path/to/g++ \
-  --out benchmark/triad-full8397-memory.json
+  --javakh-interface-python path/to/python-with-javakh-interface \
+  --javakh-interface-sample-size 50 \
+  --out benchmark/memory-full8397-javakh-interface-sample50-010.json
 ```
 
 The `cppkh-interface` memory row includes the Python wrapper plus its child
 `cppkh` executable. The command assumes the executable is already cached; warm
-it before measuring when you want runtime-only memory and time.
+it before measuring when you want runtime-only memory and time. The PyPI
+`javakh-interface` row uses a deterministic sample, defaulting to 50 cases and
+seed `20260712`.
 
 ## Important Options
 
@@ -176,6 +204,12 @@ it before measuring when you want runtime-only memory and time.
 --java COMMAND            Java command, default: java.
 --javac COMMAND           javac command for the batch runner.
 --java-xmx SIZE           Java heap, default: 4g.
+--javakh-interface-python PY
+                          Optional Python executable with PyPI javakh-interface.
+--javakh-interface-sample-size N
+                          Number of prepared cases sampled for PyPI checks.
+--javakh-interface-sample-seed N
+                          Deterministic random seed for the PyPI sample.
 --java-runner MODE        auto, native, batch, or process.
 --java-keep-cache         Keep JavaKh's cache between PD codes.
 --limit N                 Run at most N cases.
@@ -216,16 +250,20 @@ the default test clears it between cases.
 The output directory contains:
 
 ```text
-prepared.pd        Normalized PD codes actually sent to both programs.
-labels.txt         Labels used in mismatch reports.
-cppkh.out          Raw cppkh stdout.
-cppkh.err          Raw cppkh stderr.
-javakh.out         Raw JavaKh stdout.
-javakh.err         Raw JavaKh stderr.
-summary.txt        Human-readable timing and result summary.
-summary.json       Machine-readable summary.
-mismatches.txt     Written only when outputs differ.
+prepared.pd                           Normalized PD codes for cppkh/JavaKh.
+labels.txt                            Labels used in mismatch reports.
+cppkh.out                             Raw cppkh stdout.
+cppkh.err                             Raw cppkh stderr.
+javakh.out                            Raw JavaKh stdout.
+javakh.err                            Raw JavaKh stderr.
+cppkh_javakh_mismatches.txt           Written only when full outputs differ.
+javakh_interface_sample.pd            Optional PyPI sample PD codes.
+javakh_interface_sample.indices.txt   Optional 1-based sample indices.
+javakh_interface_sample_mismatches.txt
+                                      Written only when sample outputs differ.
+summary.txt                           Human-readable timing and result summary.
+summary.json                          Machine-readable summary.
 ```
 
-The script exits with status `0` only when both programs exit successfully and
-all quoted homology strings match.
+The script exits with status `0` only when full `cppkh`/JavaKh comparison
+succeeds and the optional PyPI sample comparison also succeeds.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run cppkh vs bundled JavaKh consistency checks on the 10_3 link PD set."""
+"""Run cppkh/JavaKh checks, with optional javakh-interface sampling, on the 10_3 link PD set."""
 
 from __future__ import annotations
 

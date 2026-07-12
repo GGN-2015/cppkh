@@ -7,6 +7,7 @@ import argparse
 import ast
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -20,6 +21,47 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = REPO_ROOT / "tests" / "data" / "test_pdcode.txt"
 DEFAULT_LABELS = REPO_ROOT / "tests" / "data" / "test_pdcode.labels.txt"
 DEFAULT_JAVA_ROOT = REPO_ROOT / "reference" / "javakh"
+
+JAVAKH_INTERFACE_RUNNER = r"""
+import re
+import sys
+import traceback
+from pathlib import Path
+
+import javakh_interface
+
+
+def parse_crossings(text):
+    body = text.strip()
+    if body.replace(" ", "") == "PD[]":
+        return []
+    crossings = []
+    pattern = r"X\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]"
+    for match in re.finditer(pattern, body):
+        crossings.append([int(match.group(i)) for i in range(1, 5)])
+    if crossings:
+        return crossings
+    raise ValueError(f"unsupported prepared PD line: {text!r}")
+
+
+def main():
+    pd_file = Path(sys.argv[1])
+    de_r1 = sys.argv[2] == "1"
+    de_k8 = sys.argv[3] == "1"
+    for line in pd_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        result = javakh_interface.solve_khovanov(parse_crossings(line), de_r1=de_r1, de_k8=de_k8)
+        print(f'"{result}"')
+
+
+try:
+    main()
+except Exception:
+    traceback.print_exc(file=sys.stderr)
+    raise SystemExit(1)
+"""
 
 
 def parse_crossings(text: str) -> List[List[int]]:
@@ -128,6 +170,40 @@ def prepare_pd_file(args: argparse.Namespace, out_dir: Path) -> Tuple[Path, Path
     pd_file.write_text("\n".join(pd_lines) + ("\n" if pd_lines else ""), encoding="utf-8")
     labels_file.write_text("\n".join(prepared_labels) + ("\n" if prepared_labels else ""), encoding="utf-8")
     return pd_file, labels_file, len(pd_lines), time.perf_counter() - start_time
+
+
+def write_sample_files(
+    pd_file: Path,
+    labels_file: Path,
+    out_dir: Path,
+    sample_size: int,
+    seed: int,
+) -> Tuple[Path, Path, Path, List[int], List[str]]:
+    pd_lines = read_lines(pd_file)
+    labels = read_lines(labels_file)
+    if sample_size <= 0 or sample_size >= len(pd_lines):
+        indices = list(range(len(pd_lines)))
+    else:
+        indices = sorted(random.Random(seed).sample(range(len(pd_lines)), sample_size))
+
+    sample_lines = [pd_lines[index] for index in indices]
+    sample_labels = [labels[index] if index < len(labels) else f"case-{index + 1:06d}" for index in indices]
+
+    sample_pd = out_dir / "javakh_interface_sample.pd"
+    sample_labels_file = out_dir / "javakh_interface_sample.labels.txt"
+    sample_indices_file = out_dir / "javakh_interface_sample.indices.txt"
+    sample_pd.write_text("\n".join(sample_lines) + ("\n" if sample_lines else ""), encoding="utf-8")
+    sample_labels_file.write_text("\n".join(sample_labels) + ("\n" if sample_labels else ""), encoding="utf-8")
+    sample_indices_file.write_text(
+        "\n".join(f"{index + 1}\t{label}" for index, label in zip(indices, sample_labels))
+        + ("\n" if indices else ""),
+        encoding="utf-8",
+    )
+    return sample_pd, sample_labels_file, sample_indices_file, indices, sample_labels
+
+
+def pick_results(results: List[str], indices: List[int]) -> List[str]:
+    return [results[index] if index < len(results) else "<missing>" for index in indices]
 
 
 def candidate_cpp_exes() -> List[Path]:
@@ -384,29 +460,65 @@ def run_java(args: argparse.Namespace, java_root: Path, pd_file: Path, out_dir: 
     }
 
 
-def compare_results(cpp: List[str], java: List[str], labels: List[str], out_dir: Path, max_show: int) -> Tuple[bool, int]:
-    total = max(len(cpp), len(java))
+def run_javakh_interface(args: argparse.Namespace, pd_file: Path, out_dir: Path) -> dict:
+    command = [
+        args.javakh_interface_python,
+        "-c",
+        JAVAKH_INTERFACE_RUNNER,
+        str(pd_file),
+        "1" if args.no_external_simplify else "0",
+        "1" if args.no_external_simplify else "0",
+    ]
+    seconds, code, results = run_process(
+        "javakh-interface",
+        command,
+        REPO_ROOT,
+        out_dir / "javakh_interface.out",
+        out_dir / "javakh_interface.err",
+        args.timeout_sec,
+    )
+    return {
+        "name": "javakh-interface",
+        "seconds": seconds,
+        "exit_code": code,
+        "results": results,
+        "command": command,
+    }
+
+
+def compare_results(
+    runs: Sequence[Tuple[str, List[str]]],
+    labels: List[str],
+    out_dir: Path,
+    max_show: int,
+    report_name: str = "mismatches.txt",
+    prefix: str = "compare",
+) -> Tuple[bool, int]:
+    total = max((len(results) for _, results in runs), default=0)
     mismatches = []
     for index in range(total):
-        cpp_value = cpp[index] if index < len(cpp) else "<missing>"
-        java_value = java[index] if index < len(java) else "<missing>"
-        if cpp_value != java_value:
+        values = []
+        for name, results in runs:
+            value = results[index] if index < len(results) else "<missing>"
+            values.append((name, value))
+        if len({value for _, value in values}) != 1:
             label = labels[index] if index < len(labels) else f"case-{index + 1:06d}"
-            mismatches.append((index + 1, label, cpp_value, java_value))
+            mismatches.append((index + 1, label, values))
 
     if mismatches:
-        mismatch_file = out_dir / "mismatches.txt"
+        mismatch_file = out_dir / report_name
         lines = []
-        for index, label, cpp_value, java_value in mismatches:
+        for index, label, values in mismatches:
             lines.append(f"{index}\t{label}")
-            lines.append(f"  cppkh : {cpp_value}")
-            lines.append(f"  JavaKh: {java_value}")
+            for name, value in values:
+                lines.append(f"  {name}: {value}")
         mismatch_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"compare: MISMATCH ({len(mismatches)} mismatches, details: {mismatch_file})")
-        for index, label, cpp_value, java_value in mismatches[:max_show]:
-            print(f"  {index} {label}: cppkh=[{cpp_value}] JavaKh=[{java_value}]")
+        print(f"{prefix}: MISMATCH ({len(mismatches)} mismatches, details: {mismatch_file})")
+        for index, label, values in mismatches[:max_show]:
+            rendered = " ".join(f"{name}=[{value}]" for name, value in values)
+            print(f"  {index} {label}: {rendered}")
         return False, len(mismatches)
-    print("compare: OK")
+    print(f"{prefix}: OK")
     return True, 0
 
 
@@ -424,16 +536,44 @@ def write_summary(out_dir: Path, summary: dict) -> None:
         f"javakh_runner: {summary['javakh'].get('runner', 'unknown')}",
         f"cppkh_results: {summary['cppkh']['result_count']}",
         f"javakh_results: {summary['javakh']['result_count']}",
+        f"cppkh_javakh_full_match: {summary['cppkh_javakh_full_match']}",
+        f"cppkh_javakh_full_mismatches: {summary['cppkh_javakh_full_mismatches']}",
         f"match: {summary['match']}",
-        f"mismatches: {summary['mismatches']}",
     ]
+    javakh_interface = summary.get("javakh_interface")
+    if javakh_interface:
+        sample = javakh_interface["sample"]
+        lines.extend(
+            [
+                f"javakh_interface_sample_size: {sample['count']}",
+                f"javakh_interface_sample_seed: {sample['seed']}",
+                f"javakh_interface_seconds: {javakh_interface['seconds']:.6f}",
+                f"javakh_interface_average_seconds: {javakh_interface['average_seconds']:.6f}",
+                f"javakh_interface_exit: {javakh_interface['exit_code']}",
+                f"javakh_interface_results: {javakh_interface['result_count']}",
+                f"javakh_interface_sample_match: {javakh_interface['sample_match']}",
+                f"javakh_interface_sample_mismatches: {javakh_interface['sample_mismatches']}",
+            ]
+        )
+    else:
+        lines.append("javakh_interface: disabled")
     if summary["cppkh"]["seconds"] > 0:
         lines.append(f"java_over_cpp_speed_ratio: {summary['javakh']['seconds'] / summary['cppkh']['seconds']:.6f}")
+    if javakh_interface and summary["cppkh"]["average_seconds"] > 0:
+        lines.append(
+            "javakh_interface_over_cpp_average_speed_ratio: "
+            f"{javakh_interface['average_seconds'] / summary['cppkh']['average_seconds']:.6f}"
+        )
     (out_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compare cppkh and bundled JavaKh on a PD-code collection.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare cppkh and bundled JavaKh on a PD-code collection, with an optional "
+            "fixed-size PyPI javakh-interface sample check."
+        )
+    )
     parser.add_argument("--input", default=str(DEFAULT_INPUT), help="PD-code file. Lines may be PD[...] or label: [[...]].")
     parser.add_argument("--labels", default=str(DEFAULT_LABELS), help="Optional labels file for reports.")
     parser.add_argument("--cpp-exe", default="", help="Path to cppkh executable.")
@@ -442,6 +582,23 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--java", default="java", help="Java command.")
     parser.add_argument("--javac", default="javac", help="javac command used for the batch runner.")
     parser.add_argument("--java-xmx", default="4g", help="Java maximum heap, for example 4g or 16384m.")
+    parser.add_argument(
+        "--javakh-interface-python",
+        default="",
+        help="Python executable with the PyPI javakh-interface package installed. Disabled when omitted.",
+    )
+    parser.add_argument(
+        "--javakh-interface-sample-size",
+        type=int,
+        default=50,
+        help="Number of prepared cases sampled for PyPI javakh-interface checks. Use 0 for all selected cases.",
+    )
+    parser.add_argument(
+        "--javakh-interface-sample-seed",
+        type=int,
+        default=20260712,
+        help="Deterministic random seed for the PyPI javakh-interface sample.",
+    )
     parser.add_argument(
         "--java-runner",
         choices=["auto", "native", "batch", "process"],
@@ -472,6 +629,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"input     : {Path(args.input).resolve()}")
     print(f"cppkh     : {cpp_exe}")
     print(f"JavaKh    : {java_root}")
+    if args.javakh_interface_python:
+        print(
+            f"PyPI iface: {args.javakh_interface_python} "
+            f"(sample={args.javakh_interface_sample_size}, seed={args.javakh_interface_sample_seed})"
+        )
+    else:
+        print("PyPI iface: disabled")
     print(f"out       : {out_dir}")
     print("stage     : prepare PD codes")
     pd_file, labels_file, count, prepare_seconds = prepare_pd_file(args, out_dir)
@@ -495,17 +659,74 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     )
 
-    match, mismatches = compare_results(
-        cpp_run["results"],
-        java_run["results"],
+    full_match, full_mismatches = compare_results(
+        [
+            ("cppkh", cpp_run["results"]),
+            ("JavaKh", java_run["results"]),
+        ],
         labels,
         out_dir,
         args.max_show_mismatches,
+        report_name="cppkh_javakh_mismatches.txt",
+        prefix="full compare",
     )
+
+    javakh_interface_run = None
+    javakh_interface_match = True
+    javakh_interface_mismatches = 0
+    javakh_interface_sample = None
+    if args.javakh_interface_python:
+        sample_pd, sample_labels_file, sample_indices_file, sample_indices, sample_labels = write_sample_files(
+            pd_file,
+            labels_file,
+            out_dir,
+            args.javakh_interface_sample_size,
+            args.javakh_interface_sample_seed,
+        )
+        javakh_interface_sample = {
+            "count": len(sample_indices),
+            "seed": args.javakh_interface_sample_seed,
+            "indices_file": str(sample_indices_file),
+            "pd_file": str(sample_pd),
+            "labels_file": str(sample_labels_file),
+            "indices_1_based": [index + 1 for index in sample_indices],
+        }
+        print(
+            "stage     : run PyPI javakh-interface sample "
+            f"({len(sample_indices)} of {count}, seed={args.javakh_interface_sample_seed})"
+        )
+        javakh_interface_run = run_javakh_interface(args, sample_pd, out_dir)
+        print(
+            "PyPI iface: {0:.3f}s, exit={1}, results={2}, avg={3:.6f}s/case".format(
+                javakh_interface_run["seconds"],
+                javakh_interface_run["exit_code"],
+                len(javakh_interface_run["results"]),
+                javakh_interface_run["seconds"] / len(sample_indices) if sample_indices else 0.0,
+            )
+        )
+        javakh_interface_match, javakh_interface_mismatches = compare_results(
+            [
+                ("cppkh", pick_results(cpp_run["results"], sample_indices)),
+                ("JavaKh", pick_results(java_run["results"], sample_indices)),
+                ("javakh-interface", javakh_interface_run["results"]),
+            ],
+            sample_labels,
+            out_dir,
+            args.max_show_mismatches,
+            report_name="javakh_interface_sample_mismatches.txt",
+            prefix="sample compare",
+        )
+
     if cpp_run["seconds"] > 0:
         print(f"timing    : JavaKh / cppkh = {java_run['seconds'] / cpp_run['seconds']:.3f}x")
+    if javakh_interface_run and count > 0:
+        cpp_avg = cpp_run["seconds"] / count
+        iface_avg = javakh_interface_run["seconds"] / javakh_interface_sample["count"]
+        if cpp_avg > 0:
+            print(f"timing    : javakh-interface sample avg / cppkh full avg = {iface_avg / cpp_avg:.3f}x")
     print(f"summary   : {out_dir / 'summary.txt'}")
 
+    match = full_match and javakh_interface_match
     summary = {
         "input": str(Path(args.input).resolve()),
         "prepared_pd_file": str(pd_file),
@@ -515,6 +736,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "cppkh": {
             "path": str(cpp_exe),
             "seconds": cpp_run["seconds"],
+            "average_seconds": cpp_run["seconds"] / count if count else 0.0,
             "exit_code": cpp_run["exit_code"],
             "result_count": len(cpp_run["results"]),
             "command": cpp_run["command"],
@@ -522,17 +744,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "javakh": {
             "path": str(java_root),
             "seconds": java_run["seconds"],
+            "average_seconds": java_run["seconds"] / count if count else 0.0,
             "exit_code": java_run["exit_code"],
             "result_count": len(java_run["results"]),
             "command": java_run["command"],
             "runner": java_run.get("runner", "unknown"),
         },
         "match": match,
-        "mismatches": mismatches,
+        "cppkh_javakh_full_match": full_match,
+        "cppkh_javakh_full_mismatches": full_mismatches,
     }
+    if javakh_interface_run and javakh_interface_sample:
+        sample_count = javakh_interface_sample["count"]
+        summary["javakh_interface"] = {
+            "python": args.javakh_interface_python,
+            "seconds": javakh_interface_run["seconds"],
+            "average_seconds": javakh_interface_run["seconds"] / sample_count if sample_count else 0.0,
+            "exit_code": javakh_interface_run["exit_code"],
+            "result_count": len(javakh_interface_run["results"]),
+            "command": javakh_interface_run["command"],
+            "sample": javakh_interface_sample,
+            "sample_match": javakh_interface_match,
+            "sample_mismatches": javakh_interface_mismatches,
+        }
     write_summary(out_dir, summary)
 
     if cpp_run["exit_code"] != 0 or java_run["exit_code"] != 0 or not match:
+        return 1
+    if javakh_interface_run and javakh_interface_run["exit_code"] != 0:
         return 1
     return 0
 

@@ -2,7 +2,9 @@
 
 The benchmark helper converts `test_pdcode.txt`, applies the external
 R1/nugatory simplifiers when requested, runs `cppkh` and the bundled JavaKh
-reference, and compares quoted homology strings.
+reference on the selected input, and compares quoted homology strings. When
+`--javakh-interface-python` is supplied, the PyPI `javakh-interface` package is
+checked only on a deterministic random sample.
 
 Install the external simplifiers used for JavaKh comparison:
 
@@ -25,16 +27,19 @@ org.katlas.JavaKh.JavaKh -f prepared.pd
 
 ## Current Local Benchmark
 
-Machine-local benchmark on Windows, 2026-07-07:
+Machine-local benchmark on Windows, 2026-07-12:
 
 - C++ compiler: WinLibs GCC 16.1.0 x86_64 UCRT POSIX SEH.
 - Java VM: Java HotSpot 64-Bit Server VM 21.0.5.
-- `cppkh` executable: `benchmark\bench-triad-cpp\cppkh.exe`.
+- `cppkh` executable: `dist\windows\cppkh.exe`.
 - `cppkh-interface` package: local `cppkh-interface 0.1.1` wheel installed
   into `benchmark\venv-cppkh-interface-011`.
 - `cppkh-interface` timing excludes first-use C++ compilation. The benchmark
   used the already cached executable under
   `benchmark\cppkh-interface-cache-011`.
+- PyPI `javakh-interface 0.1.0` was installed into
+  `benchmark\venv-javakh-interface-010`. It was tested on 50 deterministic
+  random cases with seed `20260712`.
 - Java runner: patched bundled JavaKh native multiline reader
   (`--java-runner native`).
 - Input: 8397 normalized PD codes in `tests\data\test_pdcode.txt`.
@@ -46,7 +51,12 @@ Machine-local benchmark on Windows, 2026-07-07:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | First 1000 lines | 1000 | 1.249s | 4.294s | 4.041s | 47.484s | 11.059x | 11.750x | OK |
 | Last 1000 lines | 1000 | 1.587s | 17.851s | 17.262s | 83.403s | 4.672x | 4.831x | OK |
-| Full `test_pdcode.txt` | 8397 | 11.057s | 61.596s | 61.392s | 466.562s | 7.575x | 7.600x | OK |
+| Full `test_pdcode.txt` | 8397 | 12.368s | 64.659s | 64.944s | 299.234s | 4.628x | 4.608x | OK |
+
+PyPI `javakh-interface` is intentionally not run on the full 8397 cases. On
+the 50-case sample from the full set, it completed in `29.436s`, averaging
+`588.714 ms` per PD code, and matched `cppkh` and patched JavaKh on all 50
+sampled cases.
 
 ![cppkh benchmark runtime and memory chart](assets/benchmark_runtime_memory.png)
 
@@ -64,51 +74,59 @@ cppkh-interface   | #### 17.262 ms
 patched JavaKh    | #################### 83.403 ms
 
 Full 8397
-cppkh             | ### 7.336 ms
-cppkh-interface   | ### 7.311 ms
-patched JavaKh    | #################### 55.563 ms
+cppkh             | ### 7.700 ms
+cppkh-interface   | ### 7.734 ms
+patched JavaKh    | #################### 35.635 ms
+PyPI javakh-iface | sample n=50, 588.714 ms
 ```
 
-The full-run summary was:
+The combined full-run summaries were:
 
 ```text
 items: 8397
-cppkh_seconds: 61.596
-cppkh_interface_seconds: 61.392
-javakh_seconds: 466.562
+cppkh_seconds: 64.659
+cppkh_interface_seconds: 64.944
+javakh_seconds: 299.234
 cppkh_results: 8397
 cppkh_interface_results: 8397
 javakh_results: 8397
-match: True
-mismatches: 0
-java_over_cpp_speed_ratio: 7.575
-java_over_cppkh_interface_speed_ratio: 7.600
+cppkh_javakh_full_match: True
+cppkh_interface_match: True
+java_over_cpp_speed_ratio: 4.628
+java_over_cppkh_interface_speed_ratio: 4.608
+javakh_interface_sample_size: 50
+javakh_interface_seconds: 29.436
+javakh_interface_average_seconds: 0.589
+javakh_interface_sample_match: True
 ```
 
 ## Peak Memory
 
-Peak resident memory was measured separately on the same prepared full input
-with `tools/measure_peak_memory.py`. The measurement discards stdout/stderr and
-samples process-tree RSS with `psutil`, so it is intended to compare memory
-pressure rather than to validate output again. The `cppkh-interface` row
-includes the Python wrapper process plus the cached child `cppkh` executable,
-and still excludes first-use compilation.
+Peak resident memory was measured separately with `tools/measure_peak_memory.py`.
+The measurement discards stdout/stderr and samples process-tree RSS with
+`psutil`, so it is intended to compare memory pressure rather than to validate
+output again. `cppkh`, `cppkh-interface`, and patched JavaKh were measured on
+the full prepared input. PyPI `javakh-interface` was measured on the same
+50-case sample policy as the correctness check.
 
-| Input set | Metric | cppkh | cppkh-interface | patched JavaKh | Java/cppkh | Java/interface |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Full `test_pdcode.txt` | Peak RSS | 26.04 MiB | 68.08 MiB | 453.57 MiB | 17.42x | 6.66x |
+| Input set | Metric | cppkh | cppkh-interface | patched JavaKh | PyPI javakh-interface |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Full `test_pdcode.txt`; PyPI sample n=50 | Peak RSS | 26.06 MiB | 347.17 MiB | 490.49 MiB | 159.02 MiB |
 
 The memory-measurement run completed successfully:
 
 ```text
-cppkh_seconds: 62.425
-cppkh_interface_seconds: 63.848
-javakh_seconds: 457.233
-cppkh_peak_rss_mib: 26.035
-cppkh_interface_peak_rss_mib: 68.078
-javakh_peak_rss_mib: 453.570
-javakh_over_cpp_peak_rss_ratio: 17.421
-javakh_over_cppkh_interface_peak_rss_ratio: 6.662
+cppkh_seconds: 63.974
+cppkh_interface_seconds: 87.758
+javakh_interface_seconds: 28.894
+javakh_seconds: 282.774
+cppkh_peak_rss_mib: 26.059
+cppkh_interface_peak_rss_mib: 347.168
+javakh_interface_peak_rss_mib: 159.023
+javakh_peak_rss_mib: 490.492
+javakh_over_cpp_peak_rss_ratio: 18.823
+javakh_over_cppkh_interface_peak_rss_ratio: 1.413
+javakh_interface_sample_size: 50
 ```
 
 ## Regenerating The Figure
@@ -129,10 +147,11 @@ Rerun the peak-RSS measurement on an already prepared full PD file:
 
 ```sh
 python tools/measure_peak_memory.py \
-  --prepared-pd benchmark/triad-full8397-011/prepared.pd \
-  --cpp-exe benchmark/bench-triad-cpp/cppkh.exe \
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-010/prepared.pd \
+  --cpp-exe dist/windows/cppkh.exe \
   --cppkh-interface-python benchmark/venv-cppkh-interface-011/Scripts/python.exe \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache-011 \
-  --cppkh-interface-cxx /path/to/g++ \
-  --out benchmark/triad-full8397-memory-011.json
+  --javakh-interface-python benchmark/venv-javakh-interface-010/Scripts/python.exe \
+  --javakh-interface-sample-size 50 \
+  --out benchmark/memory-full8397-javakh-interface-sample50-010.json
 ```
