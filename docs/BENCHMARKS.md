@@ -58,6 +58,9 @@ the 50-case sample from the full set, it completed in `29.185s`, averaging
 `583.705 ms` per PD code, and matched `cppkh` and patched JavaKh on all 50
 sampled cases.
 
+The figure below intentionally omits the PyPI `javakh-interface` sample rows so
+the bars compare only full-input front ends.
+
 ![cppkh benchmark runtime and memory chart](assets/benchmark_runtime_memory.png)
 
 Average milliseconds per PD code, lower is better:
