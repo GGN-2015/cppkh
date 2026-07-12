@@ -9,6 +9,9 @@ reference/javakh/
 This runtime is only used as a reference implementation for compatibility
 checks. The normal `cppkh` executable does not require Java.
 
+The complete algorithm-change, debugging, and validation record is maintained
+in [Bundled JavaKh Modifications And Debugging Record](ALGORITHM.md#bundled-javakh-modifications-and-debugging-record).
+
 ## Patched Entry Point
 
 The bundled `org.katlas.JavaKh.JavaKh` class is patched from the original

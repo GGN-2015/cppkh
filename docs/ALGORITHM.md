@@ -112,6 +112,114 @@ The accepted `--threads` option is retained for CLI and Python-package
 compatibility. Benchmarking showed row-level parallelism was slower for the
 current implementation and data set.
 
+## Bundled JavaKh Modifications And Debugging Record
+
+The Java runtime under `reference/javakh/` is not an untouched JavaKh binary.
+It is a compatibility reference patched for repeatable batch testing and for
+the corrected oriented-link crossing convention. This section is the source of
+truth for every intentional difference from the bundled upstream classes.
+
+### Mathematical algorithm change: crossing orientation
+
+The original `Komplex.getSigns(int[][])` infers the sign of
+`X[a,b,c,d]` from numeric comparisons between `b` and `d`. That works only when
+arc numbering happens to encode the over-strand direction and fails for general
+link PD codes. It can also make an equivalent arc relabelling change the
+absolute `q,t` grading.
+
+The patched entry point no longer calls that method. It calls
+`PDOrientation.getSigns(pd)`, which performs the following linear traversal:
+
+1. Record the two crossing incidences of every arc label.
+2. Mark slot `0` of each crossing as the incoming under-edge and slot `2` as
+   the outgoing under-edge, following the SageMath PD convention.
+3. Propagate directions through the opposite slot of each crossing and through
+   the matching incidence of each arc.
+4. Deterministically orient a component which never passes under from the first
+   occurrence of its lowest-labelled unassigned edge.
+5. Determine the crossing sign from the actual direction at over-edge slot
+   `3`, with the SageMath repeated-label rules for R1 crossings.
+6. Reject malformed PD incidence data instead of silently guessing a sign.
+
+The implementation uses preallocated arrays and an integer queue. For standard
+compact PD labels its time and memory costs are linear in the crossing count.
+It does not add a shared cache or any inter-process synchronization.
+
+The original `Komplex.getSigns` method still exists inside the historical
+`Komplex.class`; replacing that large upstream class was intentionally avoided.
+The supported patched JavaKh executable path is
+`org.katlas.JavaKh.JavaKh`, which always bypasses the legacy method. Code which
+calls `Komplex.getSigns` directly is still calling the legacy algorithm and is
+not the patched reference path.
+
+No other JavaKh chain-complex mathematics was changed. `Komplex.generateFast`,
+composition, de-looping, cobordism relations, cancellation, Smith form, and
+JavaKh output formatting remain the bundled upstream implementation; only the
+crossing-sign array supplied to `generateFast` is corrected.
+
+### Entry-point reliability and batch behavior
+
+`reference/javakh/org/katlas/JavaKh/JavaKh.java` also contains operational
+patches needed for deterministic comparisons:
+
+| Area | Patched behavior | Reason |
+| --- | --- | --- |
+| Input | Reads one PD code from every non-empty line | Avoid one JVM start per case |
+| Input path | Accepts `-f`, `--pd-file`, or a positional path | Test arbitrary prepared data files |
+| Failure isolation | Catches failures per line and continues | Preserve later results in long runs |
+| Error output | Prints one-line `ERROR line=... pd=... error=...` records | Make the failing input reproducible |
+| Disk cache | Clears the working-directory `cache/` before each PD code and after failures | Prevent stale JavaKh cache data crossing job boundaries |
+| Logging | Keeps `-i` and `-d` as explicit INFO/DEBUG controls | Keep normal comparison output parseable |
+| Sign diagnostics | Adds `-S` / `--print-crossing-signs` | Inspect orientation without constructing a complex |
+| Build target | Commits Java 8-compatible `JavaKh.class` and `PDOrientation.class` | Run the same patched entry point without recompiling |
+
+The cache cleanup is process-local filesystem hygiene. It is not a shared
+runtime cache and does not introduce a cross-process lock.
+
+### Matching CppKh and Python changes
+
+CppKh implements the same incidence traversal in `getSigns`. When diagram
+simplification is enabled, CppKh computes signs on the original oriented PD
+code and erases sign entries alongside removed crossings. Surviving signs are
+therefore not recomputed from renumbered arcs. The `cppkh-interface` package and
+the ctypes wrapper call this C++ implementation and contain no independent sign
+algorithm.
+
+Both native programs expose `--print-crossing-signs`. The focused test compares
+these lists directly before comparing homology, so two implementations cannot
+pass merely by reproducing the same final text through unrelated grading
+conventions.
+
+### Debugging evidence and regression coverage
+
+The minimal two-component regression is:
+
+```text
+PD[X[1,4,2,3],X[2,4,1,3]]
+```
+
+The numeric-label algorithm assigns `[1,1]`; incidence tracing assigns
+`[-1,1]`. The regression set also includes a three-component SageMath example,
+an arbitrary relabelling of that example, and both repeated-label R1 sign
+forms. The relabelled and original diagrams must have identical signs and
+homology.
+
+Run the focused diagnostics with:
+
+```sh
+python tools/test_pd_orientation.py --cpp-exe path/to/cppkh
+```
+
+Before releasing `cppkh-interface 0.1.2`, the focused sign and homology tests
+passed for CppKh, patched JavaKh, `cppkh-interface`, and the ctypes wrapper. The
+full prepared collection then produced exact matching output on all `8397`
+cases for CppKh, patched JavaKh, and `cppkh-interface`.
+
+PyPI `javakh-interface` still bundles legacy JavaKh. Its differences are kept
+as informational reports and do not gate the patched three-way comparison.
+Tests which claim patched JavaKh compatibility must use the classes in
+`reference/javakh/`, not the JavaKh copy embedded in that external package.
+
 ## Correctness Tests
 
 The main compatibility runner is:
