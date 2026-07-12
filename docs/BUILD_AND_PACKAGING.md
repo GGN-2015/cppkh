@@ -1,12 +1,19 @@
 # Build and Packaging
 
-This project is a single C++14 translation unit with selectable threading
-backends. The build scripts can be called with no arguments; they probe the
-available compiler and backend choices, then select the fastest supported local
-mode.
+`cppkh` is built with a single cross-platform Python entry point:
+
+```sh
+python build.py
+```
+
+The script compiles `src/main.cpp`, selects a usable C++14 compiler, probes the
+available thread backend, packages the output under `dist/<platform>/`, and
+copies non-system runtime dependencies beside the produced binary when dynamic
+runtime libraries are used.
 
 ## Requirements
 
+- Python 3.10 or newer.
 - A C++14 compiler. `g++` is the default choice.
 - On Windows, a 64-bit MinGW-w64 toolchain is recommended.
 - Java is not required for building or running `cppkh`.
@@ -18,27 +25,15 @@ toolchain:
 .\tools\install_winlibs_gcc.ps1
 ```
 
-The package scripts automatically search `..\toolchains\winlibs-*` before
-falling back to `CXX`, `g++`, `clang++`, or `c++`.
+`build.py` searches `..\toolchains\winlibs-*` before falling back to `CXX`,
+`g++`, `clang++`, or `c++`.
 
-## Fast Executable Packaging
+## Fast Executable
 
-Windows:
-
-```bat
-package.bat
-```
-
-PowerShell:
-
-```powershell
-.\package.ps1
-```
-
-Linux / macOS / MSYS2:
+Build the default executable:
 
 ```sh
-sh package.sh
+python build.py
 ```
 
 Default outputs:
@@ -49,34 +44,21 @@ Default outputs:
 | Linux | `dist/linux/cppkh` |
 | macOS | `dist/macos/cppkh` |
 
-With no arguments, the scripts use `-O3 -DNDEBUG`, enable `-march=native` and
-`-flto` when the compiler accepts them, and strip the final binary when a
-compatible `strip` is available. The default mode keeps dynamic runtime
-libraries dynamic, scans the finished binary, and copies any non-system runtime
-dependencies it can locate into the output directory.
+With no arguments, `build.py` uses `-O3 -DNDEBUG`, enables `-march=native` and
+`-flto` when the compiler accepts them, strips the final binary when a
+compatible `strip` is available, scans the finished binary, and copies
+resolvable non-system runtime dependencies into the output directory.
 
 Use `--portable` when the result must run on CPUs older or different from the
 build machine. Use `--static` only when you explicitly want the executable to
 try full static linking.
 
-## Shared Library Packaging
+## Shared Library
 
-Windows:
-
-```bat
-package.bat --shared --name cppkh
-```
-
-PowerShell:
-
-```powershell
-.\package.ps1 -Shared -Name cppkh
-```
-
-Linux / macOS / MSYS2:
+Build a shared library:
 
 ```sh
-sh package.sh --shared --name cppkh
+python build.py --shared --name cppkh
 ```
 
 Default shared-library outputs:
@@ -114,27 +96,7 @@ are allocated by the library and must be released with `cppkh_free`.
 The batch compute functions accept a text document containing one or more
 standard `PD[...]` blocks and return one unquoted homology string per line.
 
-## Script Options
-
-Windows batch syntax:
-
-```bat
-package.bat --backend pthread --static --no-lto --cxx C:\path\to\g++.exe --out dist\win64
-```
-
-PowerShell syntax:
-
-```powershell
-.\package.ps1 -Backend pthread -Static -NoLto -Cxx C:\path\to\g++.exe -Out dist\win64
-```
-
-POSIX syntax:
-
-```sh
-sh package.sh --backend pthread --cxx /opt/gcc/bin/g++ --out dist/linux-gcc
-```
-
-Common options:
+## Options
 
 ```text
 --backend NAME       auto, pthread, std, boost, win32, single
@@ -153,7 +115,19 @@ Common options:
 --extra-ldflags X    append linker flags
 ```
 
-Thread backend notes:
+Example with explicit compiler and output directory:
+
+```sh
+python build.py --backend pthread --static --no-lto --cxx C:\path\to\g++.exe --out dist\win64
+```
+
+Development-style builds can use the same entry point:
+
+```sh
+python build.py --out build --no-strip
+```
+
+## Thread Backend Notes
 
 - `pthread` is preferred on POSIX and with POSIX MinGW-w64 builds.
 - `win32` uses Windows synchronization primitives.
@@ -169,40 +143,3 @@ the produced `cppkh.dll`.
 The runtime `--threads` CLI option is accepted for compatibility, but the core
 algorithm intentionally runs one PD code serially because row-level parallelism
 was slower in the validated benchmark set.
-
-## Development Builds
-
-The lighter build scripts place binaries in `build/`:
-
-```bat
-build.bat
-```
-
-```sh
-sh build.sh
-```
-
-These scripts delegate to the package scripts with `--out build --no-strip`.
-
-## CMake
-
-Executable:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DKH_THREAD_BACKEND=pthread
-cmake --build build --config Release
-```
-
-Executable plus shared library:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DKH_THREAD_BACKEND=pthread -DCPPKH_BUILD_SHARED=ON
-cmake --build build --config Release
-```
-
-Valid `KH_THREAD_BACKEND` values are `auto`, `pthread`, `std`, `boost`,
-`win32`, and `single`.
-
-CMake builds do not run the dependency-copy scanner. Use `package.ps1`,
-`package.bat`, or `package.sh` when you want runtime DLL / SO / dylib files
-collected beside the produced binary.

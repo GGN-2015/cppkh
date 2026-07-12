@@ -6,22 +6,8 @@ The shared library exposes a small C ABI that can be loaded with Python
 
 ## Build the Library
 
-Windows:
-
-```bat
-package.bat --shared --name cppkh
-```
-
-PowerShell:
-
-```powershell
-.\package.ps1 -Shared -Name cppkh
-```
-
-Linux / macOS:
-
 ```sh
-sh package.sh --shared --name cppkh
+python build.py --shared --name cppkh
 ```
 
 Default library names:
@@ -32,18 +18,11 @@ Default library names:
 | Linux | `dist/linux/libcppkh.so` |
 | macOS | `dist/macos/libcppkh.dylib` |
 
-The package scripts scan the finished library and copy non-system runtime
+`build.py` scans the finished library and copies non-system runtime
 dependencies they can locate into the same directory. Keep those copied files
 beside the main library. The Python wrapper adds the library directory to the
 Windows DLL search path, and on Linux/macOS it preloads sibling `.so` /
 `.dylib` files before loading `libcppkh`.
-
-You can also build the shared target with CMake:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPPKH_BUILD_SHARED=ON
-cmake --build build --config Release
-```
 
 ## Use the Wrapper
 

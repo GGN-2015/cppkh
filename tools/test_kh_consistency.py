@@ -223,12 +223,7 @@ def candidate_cpp_exes() -> List[Path]:
 
 
 def build_cpp() -> None:
-    if os.name == "nt":
-        script = REPO_ROOT / "package.bat"
-        subprocess.run([str(script)], cwd=str(REPO_ROOT), check=True)
-    else:
-        script = REPO_ROOT / "package.sh"
-        subprocess.run(["sh", str(script)], cwd=str(REPO_ROOT), check=True)
+    subprocess.run([sys.executable, str(REPO_ROOT / "build.py")], cwd=str(REPO_ROOT), check=True)
 
 
 def find_cpp_exe(path_arg: str, build_if_missing: bool) -> Path:
@@ -577,7 +572,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--input", default=str(DEFAULT_INPUT), help="PD-code file. Lines may be PD[...] or label: [[...]].")
     parser.add_argument("--labels", default=str(DEFAULT_LABELS), help="Optional labels file for reports.")
     parser.add_argument("--cpp-exe", default="", help="Path to cppkh executable.")
-    parser.add_argument("--build-cpp", action="store_true", help="Run the package script if no cppkh executable is found.")
+    parser.add_argument("--build-cpp", action="store_true", help="Run build.py if no cppkh executable is found.")
     parser.add_argument("--java-root", default=str(DEFAULT_JAVA_ROOT), help="Bundled JavaKh reference directory.")
     parser.add_argument("--java", default="java", help="Java command.")
     parser.add_argument("--javac", default="javac", help="javac command used for the batch runner.")

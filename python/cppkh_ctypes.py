@@ -1,8 +1,8 @@
 """Small ctypes wrapper for the cppkh shared library.
 
-The wrapper expects a library built with package scripts using --shared, or a
-CMake build configured with -DCPPKH_BUILD_SHARED=ON. Set CPPKH_LIBRARY or pass
-the library path to CppKhLibrary when the file is not beside this module.
+Build the library with ``python build.py --shared --name cppkh``. Set
+CPPKH_LIBRARY or pass the library path to CppKhLibrary when the file is not
+beside this module.
 """
 
 from __future__ import annotations

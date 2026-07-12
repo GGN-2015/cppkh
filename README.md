@@ -26,22 +26,8 @@ compiler.
 
 Build the fastest executable that the current machine can support:
 
-Windows:
-
-```bat
-package.bat
-```
-
-PowerShell:
-
-```powershell
-.\package.ps1
-```
-
-Linux / macOS / MSYS2:
-
 ```sh
-sh package.sh
+python build.py
 ```
 
 Run one PD code:
@@ -82,16 +68,12 @@ Peak RSS on the same prepared full input was `26.05 MiB` for `cppkh`,
 
 Build a shared library instead of an executable:
 
-```bat
-package.bat --shared --name cppkh
-```
-
 ```sh
-sh package.sh --shared --name cppkh
+python build.py --shared --name cppkh
 ```
 
 This produces `cppkh.dll`, `libcppkh.so`, or `libcppkh.dylib`, depending on the
-platform. Any non-system runtime libraries found by the package script are
+platform. Any non-system runtime libraries found by `build.py` are
 copied beside it.
 
 ## Documentation
