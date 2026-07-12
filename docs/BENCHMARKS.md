@@ -38,7 +38,7 @@ Machine-local benchmark on Windows, 2026-07-12:
   used the already cached executable under
   `benchmark\cppkh-interface-cache-011`.
 - PyPI `javakh-interface 0.1.0` was installed into
-  `benchmark\venv-javakh-interface-010`. It was tested on 50 deterministic
+  `benchmark\venv-javakh-interface-010`. It was tested on 100 deterministic
   random cases with seed `20260712`.
 - Java runner: patched bundled JavaKh native multiline reader
   (`--java-runner native`).
@@ -54,8 +54,8 @@ Machine-local benchmark on Windows, 2026-07-12:
 | Full `test_pdcode.txt` | 8397 | 11.891s | 64.185s | 65.406s | 298.453s | 4.650x | 4.563x | OK |
 
 PyPI `javakh-interface` is intentionally not run on the full 8397 cases. On
-the 50-case sample from the full set, it completed in `29.185s`, averaging
-`583.705 ms` per PD code, and matched `cppkh` and patched JavaKh on all 50
+the 100-case sample from the full set, it completed in `58.558s`, averaging
+`585.580 ms` per PD code, and matched `cppkh` and patched JavaKh on all 100
 sampled cases.
 
 The figure below intentionally omits the PyPI `javakh-interface` sample rows so
@@ -80,7 +80,7 @@ Full 8397
 cppkh             | ### 7.644 ms
 cppkh-interface   | ### 7.789 ms
 patched JavaKh    | #################### 35.543 ms
-PyPI javakh-iface | sample n=50, 583.705 ms
+PyPI javakh-iface | sample n=100, 585.580 ms
 ```
 
 The combined full-run summaries were:
@@ -97,9 +97,9 @@ cppkh_javakh_full_match: True
 cppkh_interface_match: True
 java_over_cpp_speed_ratio: 4.650
 java_over_cppkh_interface_speed_ratio: 4.563
-javakh_interface_sample_size: 50
-javakh_interface_seconds: 29.185
-javakh_interface_average_seconds: 0.584
+javakh_interface_sample_size: 100
+javakh_interface_seconds: 58.558
+javakh_interface_average_seconds: 0.586
 javakh_interface_sample_match: True
 ```
 
@@ -109,8 +109,9 @@ Peak resident memory was measured separately with `tools/measure_peak_memory.py`
 The measurement discards stdout/stderr and samples process-tree RSS with
 `psutil`, so it is intended to compare memory pressure rather than to validate
 output again. `cppkh`, `cppkh-interface`, and patched JavaKh were measured on
-the full prepared input. PyPI `javakh-interface` was measured on the same
-50-case sample policy as the correctness check.
+the full prepared input. The PyPI `javakh-interface` peak-RSS row below is from
+the earlier 50-case memory sample; correctness sampling now defaults to 100
+cases.
 
 | Input set | Metric | cppkh | cppkh-interface | patched JavaKh | PyPI javakh-interface |
 | --- | --- | ---: | ---: | ---: | ---: |

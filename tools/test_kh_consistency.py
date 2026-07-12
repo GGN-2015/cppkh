@@ -590,7 +590,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--javakh-interface-sample-size",
         type=int,
-        default=50,
+        default=100,
         help="Number of prepared cases sampled for PyPI javakh-interface checks. Use 0 for all selected cases.",
     )
     parser.add_argument(

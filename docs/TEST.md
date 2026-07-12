@@ -109,7 +109,7 @@ python tools/test_kh_consistency.py --start 6615 --limit 100 --out-dir benchmark
 
 To include the PyPI `javakh-interface` sample check, pass the Python executable
 for the environment where the package is installed. The default sample size is
-50; use `--javakh-interface-sample-size` to override it.
+100; use `--javakh-interface-sample-size` to override it.
 
 ```sh
 python tools/test_kh_consistency.py --javakh-interface-python path/to/python --limit 100
@@ -154,9 +154,9 @@ already prepared PD file:
 
 ```sh
 python tools/benchmark_cppkh_interface.py \
-  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-011/prepared.pd \
-  --expected-out benchmark/triad-full8397-javakh-interface-sample50-011/cppkh.out \
-  --out benchmark/cppkh-interface-full8397-sample50-011.json
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample100-012/prepared.pd \
+  --expected-out benchmark/triad-full8397-javakh-interface-sample100-012/cppkh.out \
+  --out benchmark/cppkh-interface-full8397-sample100-012.json
 ```
 
 The script selects a 64-bit benchmark compiler when one is available. Override
@@ -178,19 +178,19 @@ Measure process-tree RSS for the full-input front ends plus a PyPI
 
 ```sh
 python tools/measure_peak_memory.py \
-  --prepared-pd benchmark/triad-full8397-javakh-interface-sample50-011/prepared.pd \
+  --prepared-pd benchmark/triad-full8397-javakh-interface-sample100-012/prepared.pd \
   --cpp-exe dist/windows/cppkh.exe \
   --cppkh-interface-python path/to/python-with-cppkh-interface \
   --cppkh-interface-cache-dir benchmark/cppkh-interface-cache \
   --javakh-interface-python path/to/python-with-javakh-interface \
-  --javakh-interface-sample-size 50 \
-  --out benchmark/memory-full8397-javakh-interface-sample50-011.json
+  --javakh-interface-sample-size 100 \
+  --out benchmark/memory-full8397-javakh-interface-sample100-012.json
 ```
 
 The `cppkh-interface` memory row includes the Python wrapper plus its child
 `cppkh` executable. The command assumes the executable is already cached; warm
 it before measuring when you want runtime-only memory and time. The PyPI
-`javakh-interface` row uses a deterministic sample, defaulting to 50 cases and
+`javakh-interface` row uses a deterministic sample, defaulting to 100 cases and
 seed `20260712`.
 
 ## Important Options
