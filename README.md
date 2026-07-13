@@ -20,9 +20,10 @@ print(cppkh_interface.solve_khovanov(pd_code))
 print(cppkh_interface.solve_many_khovanov([pd_code, pd_code]))
 ```
 
-The Python package compiles and caches the local `cppkh` executable on first
-use. Set `CXX` before running Python when you want to choose a specific C++
-compiler.
+The Python package has no runtime Python-package dependencies. It ships the
+canonical `cppkh` C++ source, compiles it with a local C++14 compiler on first
+use, and caches the resulting executable. Set `CPPKH_INTERFACE_CXX` or `CXX`
+to choose a specific compiler.
 
 Build the fastest executable that the current machine can support:
 
@@ -107,6 +108,6 @@ If you use `cppkh` in academic work, please cite this repository:
   title   = {{cppkh}: A C++ implementation of the JavaKh Khovanov homology computation path},
   year    = {2026},
   url     = {https://github.com/GGN-2015/cppkh},
-  version = {0.1.2}
+  version = {0.1.3}
 }
 ```

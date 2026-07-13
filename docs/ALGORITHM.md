@@ -45,6 +45,11 @@ exact PD code that should be sent to the core algorithm. The JavaKh consistency
 tests use this mode after the Python-side simplifiers have prepared the same
 input for both runtimes.
 
+The CLI also exposes independent `--[no-]simplify-r1` and
+`--[no-]simplify-nugatory` switches. Nugatory removal starts with R1 cleanup,
+which preserves the established `pd-code-delete-nugatory` semantics when only
+that operation is requested.
+
 ## Crossing Order
 
 The default algorithm does not keep the input crossing order. It builds the
@@ -219,6 +224,22 @@ PyPI `javakh-interface` still bundles legacy JavaKh. Its differences are kept
 as informational reports and do not gate the patched three-way comparison.
 Tests which claim patched JavaKh compatibility must use the classes in
 `reference/javakh/`, not the JavaKh copy embedded in that external package.
+
+### cppkh-interface 0.1.3 dependency removal
+
+Release `0.1.3` removes the runtime dependencies on `cpp-simple-interface`,
+`pd-code-sanity`, `pd-code-de-r1`, and `pd-code-delete-nugatory`. The package
+uses the Python standard library to discover and invoke a C++14 compiler. R1
+and nugatory simplification, including mixed option combinations and PD
+validation, now run in the packaged copy of the canonical `src/main.cpp`.
+
+Compiled executables remain content-addressed by source, compiler identity,
+flags, and platform. Competing processes compile to distinct temporary files
+and atomically publish the same immutable cache entry; there is no global lock
+or cross-process mutable algorithm cache. Before release, all four
+`de_r1`/`de_k8` combinations were compared on all 8397 default PD cases against
+the former Python simplifiers with zero differences. A clean wheel installation
+also matched CppKh and patched JavaKh on the homology output of all 8397 cases.
 
 ## Correctness Tests
 

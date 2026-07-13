@@ -17,7 +17,6 @@ import time
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-import cpp_simple_interface
 import cppkh_interface
 
 try:
@@ -152,6 +151,22 @@ def is_64bit_compiler(command: str) -> bool:
     return any(token in machine for token in ("x86_64", "amd64", "aarch64", "arm64"))
 
 
+def compiler_usable(command: str) -> bool:
+    parts = compiler_parts(command)
+    if not parts:
+        return False
+    kwargs = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if platform.system() == "Windows":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        return subprocess.run([*parts, "--version"], timeout=10, **kwargs).returncode == 0
+    except Exception:
+        return False
+
+
 def where_commands(name: str) -> list[str]:
     command = ["where.exe", name] if platform.system() == "Windows" else ["which", "-a", name]
     try:
@@ -193,21 +208,19 @@ def benchmark_compiler_candidates() -> list[str]:
 def select_benchmark_compiler() -> str:
     candidates = benchmark_compiler_candidates()
     for candidate in candidates:
-        if is_64bit_compiler(candidate):
-            cpp_simple_interface.set_gpp_filepath(candidate)
+        if compiler_usable(candidate) and is_64bit_compiler(candidate):
+            os.environ["CPPKH_INTERFACE_CXX"] = candidate
             return candidate
     for candidate in candidates:
-        try:
-            cpp_simple_interface.set_gpp_filepath(candidate)
+        if compiler_usable(candidate):
+            os.environ["CPPKH_INTERFACE_CXX"] = candidate
             return candidate
-        except Exception:
-            continue
-    return cpp_simple_interface.get_gpp_filepath()
+    raise RuntimeError("no usable C++ compiler was found")
 
 
 def compiler_runtime_env() -> dict[str, str]:
     env = os.environ.copy()
-    compiler = cpp_simple_interface.get_gpp_filepath().strip()
+    compiler = env.get("CPPKH_INTERFACE_CXX", env.get("CXX", "")).strip()
     candidates = [compiler]
     if len(compiler) >= 2 and compiler[0] == compiler[-1] and compiler[0] in ("'", '"'):
         candidates.append(compiler[1:-1])
@@ -320,7 +333,7 @@ def main() -> int:
         "last": args.last,
         "threads": args.threads,
         "compiler": selected_compiler,
-        "compiler_machine": compiler_dumpmachine(cpp_simple_interface.get_gpp_filepath()),
+        "compiler_machine": compiler_dumpmachine(selected_compiler),
         "psutil_available": psutil is not None,
         "cppkh_interface_executable": str(cppkh_interface.get_cppkh_executable()),
     }

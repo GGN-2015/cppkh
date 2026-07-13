@@ -57,7 +57,8 @@ PD[X[1,5,2,4],X[3,1,4,6],X[5,3,6,2]]
 - Python 3.
 - A built `cppkh` executable, or pass `--build-cpp`.
 - A Java runtime available as `java`.
-- The local `cppkh-interface` dependencies installed in the runner's Python.
+- The local `cppkh-interface` installed in the runner's Python. It has no
+  runtime Python-package dependencies.
 - A JDK with `javac` is only needed for `--java-runner batch`.
 - A JDK with `javac` is required by the focused PD-orientation regression.
 - Optional: the PyPI `javakh-interface` package installed in the Python used by
@@ -77,6 +78,20 @@ python -m pip install javakh-interface
 
 Pass `--no-external-simplify` to test raw PD codes without the R1 then nugatory
 preprocessing step.
+
+## Standalone Python Package Test
+
+The package-specific regression uses only the Python standard library and the
+installed `cppkh-interface` wheel:
+
+```sh
+python tools/test_cppkh_interface_standalone.py --force-compile
+```
+
+Use `--cxx path/to/g++` to select a compiler and `--cache-dir PATH` to isolate
+the executable cache. The test exercises all four `de_r1`/`de_k8` combinations
+through both single and batch calls, checks `PD[]`, and verifies malformed PD
+input is rejected by C++.
 
 ## Quick Test
 

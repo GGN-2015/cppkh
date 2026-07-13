@@ -9,22 +9,17 @@ import pathlib
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from importlib import resources
 from typing import Optional, Sequence, Union
 
-import cpp_simple_interface
-import pd_code_de_r1
-import pd_code_delete_nugatory
-import pd_code_sanity
-
-
-PathLike = Union[str, os.PathLike]
 PdInput = Union[str, Sequence[Sequence[int]]]
 PdManyInput = Union[str, Sequence[PdInput]]
-UNKNOT_RESULT = "q^-1*t^0*Z[0] + q^1*t^0*Z[0]"
+_configured_cxx: Optional[str] = None
 
 
 class CppkhInterfaceError(RuntimeError):
@@ -75,13 +70,6 @@ def _as_crossings(pd_code: PdInput) -> list[list[int]]:
             raise ValueError(f"PD crossing must have four entries: {crossing!r}")
         crossings.append([int(item) for item in values])
     return crossings
-
-
-def _check_sanity(crossings: list[list[int]]) -> None:
-    if crossings == []:
-        return
-    if not pd_code_sanity.sanity(crossings):
-        raise TypeError("pd_code does not satisfy PD-code sanity checks")
 
 
 def normalize_pd_code(pd_code: PdInput) -> str:
@@ -154,25 +142,84 @@ def _exe_suffix() -> str:
     return ".exe" if platform.system() == "Windows" else ""
 
 
-def _compiler_runtime_path_entries() -> list[str]:
-    compiler = cpp_simple_interface.get_gpp_filepath().strip()
-    if not compiler:
+def _compiler_parts(command: str) -> list[str]:
+    command = command.strip()
+    if not command:
         return []
-
-    candidates = []
-    unquoted = compiler
+    unquoted = command
     if len(unquoted) >= 2 and unquoted[0] == unquoted[-1] and unquoted[0] in ("'", '"'):
         unquoted = unquoted[1:-1]
-    candidates.append(unquoted)
-
+    if pathlib.Path(unquoted).is_file():
+        return [unquoted]
     try:
-        candidates.extend(shlex.split(compiler, posix=True))
-    except ValueError:
-        pass
+        parts = shlex.split(command, posix=os.name != "nt")
+    except ValueError as exc:
+        raise CppkhInterfaceError(f"invalid C++ compiler command: {command!r}") from exc
+    return [part.strip("\"'") for part in parts if part.strip("\"'")]
 
+
+def _subprocess_kwargs() -> dict:
+    kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if platform.system() == "Windows":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kwargs
+
+
+def _probe_compiler(parts: Sequence[str]) -> subprocess.CompletedProcess:
+    if not parts:
+        raise CppkhInterfaceError("empty C++ compiler command")
+    try:
+        result = subprocess.run([*parts, "--version"], timeout=15, **_subprocess_kwargs())
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CppkhInterfaceError(f"could not run C++ compiler {' '.join(parts)!r}: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise CppkhInterfaceError(detail or f"C++ compiler {' '.join(parts)!r} is not usable")
+    return result
+
+
+def _resolve_compiler(cxx: Optional[str] = None) -> list[str]:
+    global _configured_cxx
+
+    explicit = cxx or _configured_cxx
+    if not explicit:
+        explicit = os.environ.get("CPPKH_INTERFACE_CXX") or os.environ.get("CXX")
+    if explicit:
+        parts = _compiler_parts(explicit)
+        _probe_compiler(parts)
+        if cxx:
+            _configured_cxx = cxx
+        return parts
+
+    errors = []
+    for name in ("g++", "clang++", "c++"):
+        candidate = shutil.which(name)
+        if not candidate:
+            continue
+        parts = [candidate]
+        try:
+            _probe_compiler(parts)
+            return parts
+        except CppkhInterfaceError as exc:
+            errors.append(str(exc))
+    detail = f" ({'; '.join(errors)})" if errors else ""
+    raise CppkhInterfaceError(
+        "no usable C++ compiler was found. Install a C++14 compiler or set "
+        f"CPPKH_INTERFACE_CXX/CXX to its command{detail}"
+    )
+
+
+def _compiler_runtime_path_entries(compiler: Sequence[str]) -> list[str]:
     paths = []
-    for candidate in candidates:
-        path = pathlib.Path(candidate)
+    for candidate in compiler:
+        resolved = shutil.which(candidate) or candidate
+        path = pathlib.Path(resolved)
         if path.exists() and path.is_file():
             parent = str(path.resolve().parent)
             if parent not in paths:
@@ -180,13 +227,32 @@ def _compiler_runtime_path_entries() -> list[str]:
     return paths
 
 
-def _cache_key(source_bytes: bytes, flags: Sequence[str]) -> str:
+def _compiler_identity(compiler: Sequence[str]) -> str:
+    result = _probe_compiler(compiler)
+    executable = shutil.which(compiler[0]) or compiler[0]
+    return "\0".join([str(pathlib.Path(executable).resolve()), *compiler[1:], result.stdout.strip()])
+
+
+def _cache_key(source_bytes: bytes, flags: Sequence[str], compiler: Sequence[str]) -> str:
     digest = hashlib.sha256()
     digest.update(source_bytes)
     digest.update("\0".join(flags).encode("utf-8"))
-    digest.update(cpp_simple_interface.get_gpp_filepath().encode("utf-8"))
+    digest.update(_compiler_identity(compiler).encode("utf-8"))
     digest.update(platform.platform().encode("utf-8"))
     return digest.hexdigest()[:20]
+
+
+def _compile_source(
+    compiler: Sequence[str],
+    source: pathlib.Path,
+    output: pathlib.Path,
+    flags: Sequence[str],
+) -> subprocess.CompletedProcess:
+    command = [*compiler, *flags, str(source), "-o", str(output)]
+    try:
+        return subprocess.run(command, **_subprocess_kwargs())
+    except OSError as exc:
+        raise CppkhInterfaceError(f"could not start C++ compiler: {exc}") from exc
 
 
 def compile_cppkh(
@@ -195,50 +261,50 @@ def compile_cppkh(
     cxx: Optional[str] = None,
     extra_flags: Optional[Sequence[str]] = None,
 ) -> pathlib.Path:
-    """Compile the packaged C++ source with cpp-simple-interface and return the executable path."""
-
-    if cxx:
-        cpp_simple_interface.set_gpp_filepath(cxx)
+    """Compile the packaged C++ source and return the cached executable path."""
 
     with _resource_source_path() as source:
         source_path = pathlib.Path(source)
         source_bytes = source_path.read_bytes()
+        compiler = _resolve_compiler(cxx)
         flags = _default_compile_flags()
         if extra_flags:
             flags.extend(str(flag) for flag in extra_flags)
 
         cache = _cache_dir()
-        exe = cache / f"cppkh-{_cache_key(source_bytes, flags)}{_exe_suffix()}"
+        exe = cache / f"cppkh-{_cache_key(source_bytes, flags, compiler)}{_exe_suffix()}"
         if exe.exists() and not force:
             return exe
 
-        tmp_exe = cache / f"{exe.name}.tmp-{os.getpid()}{_exe_suffix()}"
-        if tmp_exe.exists():
-            tmp_exe.unlink()
-
-        success, message = cpp_simple_interface.compile_cpp_files(
-            [str(source_path)],
-            str(tmp_exe),
-            other_flags=flags,
-        )
-        if not success and "-march=native" in flags:
-            fallback_flags = [flag for flag in flags if flag != "-march=native"]
-            success, message = cpp_simple_interface.compile_cpp_files(
-                [str(source_path)],
-                str(tmp_exe),
-                other_flags=fallback_flags,
-            )
-
-        if not success:
-            raise CppkhInterfaceError(message)
-        if not tmp_exe.exists():
-            raise CppkhInterfaceError(f"compiled executable was not created: {tmp_exe}")
-        os.replace(tmp_exe, exe)
+        tmp_exe = cache / f"{exe.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}{_exe_suffix()}"
         try:
-            exe.chmod(exe.stat().st_mode | 0o755)
-        except OSError:
-            pass
-        return exe
+            result = _compile_source(compiler, source_path, tmp_exe, flags)
+            if result.returncode != 0 and "-march=native" in flags:
+                fallback_flags = [flag for flag in flags if flag != "-march=native"]
+                result = _compile_source(compiler, source_path, tmp_exe, fallback_flags)
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                raise CppkhInterfaceError(detail or "C++ compilation failed")
+            if not tmp_exe.exists():
+                raise CppkhInterfaceError(f"compiled executable was not created: {tmp_exe}")
+
+            if exe.exists() and not force:
+                return exe
+            try:
+                os.replace(tmp_exe, exe)
+            except OSError:
+                if force or not exe.exists():
+                    raise
+            try:
+                exe.chmod(exe.stat().st_mode | 0o755)
+            except OSError:
+                pass
+            return exe
+        finally:
+            try:
+                tmp_exe.unlink()
+            except OSError:
+                pass
 
 
 def get_cppkh_executable() -> pathlib.Path:
@@ -252,7 +318,8 @@ def _run_cppkh_document(
     *,
     encoding: Optional[str] = None,
     threads: Union[str, int] = "1",
-    simplify_pd: bool = False,
+    de_r1: bool = False,
+    de_k8: bool = False,
     print_simplified_pd: bool = False,
 ) -> list[str]:
     exe = compile_cppkh()
@@ -270,8 +337,8 @@ def _run_cppkh_document(
         "--threads",
         str(threads),
     ]
-    if not simplify_pd:
-        command.append("--no-simplify-pd")
+    command.append("--simplify-r1" if de_r1 else "--no-simplify-r1")
+    command.append("--simplify-nugatory" if de_k8 else "--no-simplify-nugatory")
     if print_simplified_pd:
         command.append("--print-simplified-pd")
 
@@ -283,7 +350,7 @@ def _run_cppkh_document(
         "errors": "replace",
     }
     env = os.environ.copy()
-    runtime_paths = _compiler_runtime_path_entries()
+    runtime_paths = _compiler_runtime_path_entries(_resolve_compiler())
     if runtime_paths:
         env["PATH"] = os.pathsep.join(runtime_paths + [env.get("PATH", "")])
     kwargs["env"] = env
@@ -303,7 +370,8 @@ def _run_cppkh_document(
         raise CppkhInterfaceError(detail or f"cppkh exited with code {result.returncode}")
 
     if print_simplified_pd:
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return [line.split("\t", 1)[-1] for line in lines]
 
     matches = re.findall(r'"([^"]*)"', result.stdout)
     if not matches:
@@ -316,14 +384,16 @@ def _run_cppkh(
     *,
     encoding: Optional[str] = None,
     threads: Union[str, int] = "1",
-    simplify_pd: bool = False,
+    de_r1: bool = False,
+    de_k8: bool = False,
     print_simplified_pd: bool = False,
 ) -> str:
     results = _run_cppkh_document(
         pd_text,
         encoding=encoding,
         threads=threads,
-        simplify_pd=simplify_pd,
+        de_r1=de_r1,
+        de_k8=de_k8,
         print_simplified_pd=print_simplified_pd,
     )
     if len(results) != 1:
@@ -331,37 +401,40 @@ def _run_cppkh(
     return results[0]
 
 
-def _prepare_crossings(pd_code: PdInput, de_r1: bool, de_k8: bool) -> list[list[int]]:
-    crossings = _as_crossings(pd_code)
-    _check_sanity(crossings)
-    if de_r1:
-        crossings = pd_code_de_r1.de_r1(crossings)
-    if de_k8:
-        crossings = pd_code_delete_nugatory.erase_all_nugatory(crossings)
-    return crossings
+def _prepare_many_for_cppkh(pd_codes: PdManyInput) -> str:
+    if isinstance(pd_codes, str):
+        return pd_codes.strip()
+    return "\n".join(normalize_pd_code(pd_code) for pd_code in pd_codes)
 
 
-def _prepare_many_for_cppkh(
-    pd_codes: PdManyInput,
+def _compute_one(
+    pd_code: PdInput,
     *,
+    encoding: Optional[str],
     de_r1: bool,
     de_k8: bool,
-) -> tuple[str, bool]:
-    if de_r1 != de_k8:
-        raise ValueError(
-            "cppkh batch mode supports de_r1 and de_k8 only as a pair. "
-            "Use both True for backend R1+nugatory simplification or both False for raw PD input."
+    show_real_pdcode: bool,
+    threads: Union[str, int],
+) -> str:
+    document = normalize_pd_code(pd_code)
+    if show_real_pdcode:
+        real_pd = _run_cppkh(
+            document,
+            encoding=encoding,
+            threads=threads,
+            de_r1=de_r1,
+            de_k8=de_k8,
+            print_simplified_pd=True,
         )
-    if isinstance(pd_codes, str):
-        return pd_codes.strip(), bool(de_r1 and de_k8)
-
-    prepared = []
-    use_cpp_simplify = bool(de_r1 and de_k8)
-    for pd_code in pd_codes:
-        crossings = _as_crossings(pd_code)
-        _check_sanity(crossings)
-        prepared.append(_format_pd(crossings))
-    return "\n".join(prepared), use_cpp_simplify
+        display_pd = real_pd if de_r1 and de_k8 else _as_crossings(real_pd)
+        print(f"Real PD code after de_r1 and de_k8: {display_pd}")
+    return _run_cppkh(
+        document,
+        encoding=encoding,
+        threads=threads,
+        de_r1=de_r1,
+        de_k8=de_k8,
+    )
 
 
 def solve_khovanov(
@@ -373,30 +446,14 @@ def solve_khovanov(
 ) -> str:
     """Compute Khovanov homology with a javakh-interface compatible signature."""
 
-    if de_r1 == de_k8:
-        crossings = _as_crossings(pd_code)
-        _check_sanity(crossings)
-        if show_real_pdcode:
-            if de_r1:
-                simplified = _run_cppkh_document(
-                    _format_pd(crossings),
-                    encoding=encoding,
-                    simplify_pd=True,
-                    print_simplified_pd=True,
-                )
-                print(f"Real PD code after de_r1 and de_k8: {simplified[0] if simplified else ''}")
-            else:
-                print(f"Real PD code after de_r1 and de_k8: {crossings}")
-        if crossings == []:
-            return UNKNOT_RESULT
-        return _run_cppkh(_format_pd(crossings), encoding=encoding, simplify_pd=de_r1)
-
-    crossings = _prepare_crossings(pd_code, de_r1=de_r1, de_k8=de_k8)
-    if show_real_pdcode:
-        print(f"Real PD code after de_r1 and de_k8: {crossings}")
-    if crossings == []:
-        return UNKNOT_RESULT
-    return _run_cppkh(_format_pd(crossings), encoding=encoding)
+    return _compute_one(
+        pd_code,
+        encoding=encoding,
+        de_r1=de_r1,
+        de_k8=de_k8,
+        show_real_pdcode=show_real_pdcode,
+        threads="1",
+    )
 
 
 def solve_many_khovanov(
@@ -414,22 +471,26 @@ def solve_many_khovanov(
     nugatory crossing removal for the whole batch.
     """
 
-    document, use_cpp_simplify = _prepare_many_for_cppkh(pd_codes, de_r1=de_r1, de_k8=de_k8)
-    if show_real_pdcode:
-        if use_cpp_simplify:
-            simplified = _run_cppkh_document(
-                document,
-                encoding=encoding,
-                threads=threads,
-                simplify_pd=True,
-                print_simplified_pd=True,
-            )
-            print(f"Real PD code after de_r1 and de_k8: {simplified}")
-        else:
-            print(f"Real PD code after de_r1 and de_k8: {document.splitlines()}")
+    document = _prepare_many_for_cppkh(pd_codes)
     if not document:
         return []
-    return _run_cppkh_document(document, encoding=encoding, threads=threads, simplify_pd=use_cpp_simplify)
+    if show_real_pdcode:
+        simplified = _run_cppkh_document(
+            document,
+            encoding=encoding,
+            threads=threads,
+            de_r1=de_r1,
+            de_k8=de_k8,
+            print_simplified_pd=True,
+        )
+        print(f"Real PD code after de_r1 and de_k8: {simplified}")
+    return _run_cppkh_document(
+        document,
+        encoding=encoding,
+        threads=threads,
+        de_r1=de_r1,
+        de_k8=de_k8,
+    )
 
 
 def compute_pd(
@@ -443,31 +504,14 @@ def compute_pd(
 ) -> str:
     """Compute Khovanov homology using the same defaults as solve_khovanov."""
 
-    if de_r1 == de_k8:
-        crossings = _as_crossings(pd_code)
-        _check_sanity(crossings)
-        if show_real_pdcode:
-            if de_r1:
-                simplified = _run_cppkh_document(
-                    _format_pd(crossings),
-                    encoding=encoding,
-                    threads=threads,
-                    simplify_pd=True,
-                    print_simplified_pd=True,
-                )
-                print(f"Real PD code after de_r1 and de_k8: {simplified[0] if simplified else ''}")
-            else:
-                print(f"Real PD code after de_r1 and de_k8: {crossings}")
-        if crossings == []:
-            return UNKNOT_RESULT
-        return _run_cppkh(_format_pd(crossings), encoding=encoding, threads=threads, simplify_pd=de_r1)
-
-    crossings = _prepare_crossings(pd_code, de_r1=de_r1, de_k8=de_k8)
-    if show_real_pdcode:
-        print(f"Real PD code after de_r1 and de_k8: {crossings}")
-    if crossings == []:
-        return UNKNOT_RESULT
-    return _run_cppkh(_format_pd(crossings), encoding=encoding, threads=threads)
+    return _compute_one(
+        pd_code,
+        encoding=encoding,
+        de_r1=de_r1,
+        de_k8=de_k8,
+        show_real_pdcode=show_real_pdcode,
+        threads=threads,
+    )
 
 
 def compute_many_pd(
@@ -494,7 +538,12 @@ def compute_many_pd(
 def simplify_pd(pd_code: PdInput, *, de_r1: bool = True, de_k8: bool = True) -> str:
     """Return the normalized PD string after optional R1 and nugatory simplification."""
 
-    return _format_pd(_prepare_crossings(pd_code, de_r1=de_r1, de_k8=de_k8))
+    return _run_cppkh(
+        normalize_pd_code(pd_code),
+        de_r1=de_r1,
+        de_k8=de_k8,
+        print_simplified_pd=True,
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

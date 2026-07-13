@@ -302,7 +302,8 @@ struct Options {
     int matrixThreads = 1;
     bool reorderCrossings = true;
     bool progress = true;
-    bool simplifyPD = true;
+    bool simplifyR1 = true;
+    bool simplifyNugatory = true;
     bool profile = false;
 };
 
@@ -3186,12 +3187,17 @@ static PDCode eraseOneNugatory(PDCode pd, size_t index, std::vector<int>* signs)
     return renumberFullDfs(bad);
 }
 
-static PDCode simplifyPDCode(PDCode pd, std::vector<int>* signs = nullptr) {
-    pd = eraseR1(pd, signs);
-    while (true) {
-        int index = findNugatory(pd);
-        if (index < 0) break;
-        pd = eraseOneNugatory(pd, static_cast<size_t>(index), signs);
+static PDCode simplifyPDCode(PDCode pd, std::vector<int>* signs,
+                             bool simplifyR1, bool simplifyNugatory) {
+    // The nugatory-crossing operation historically used by the Python API also
+    // removes R1 crossings, so nugatory-only mode still starts with R1 cleanup.
+    if (simplifyR1 || simplifyNugatory) pd = eraseR1(pd, signs);
+    if (simplifyNugatory) {
+        while (true) {
+            int index = findNugatory(pd);
+            if (index < 0) break;
+            pd = eraseOneNugatory(pd, static_cast<size_t>(index), signs);
+        }
     }
     return pd;
 }
@@ -3401,7 +3407,7 @@ static std::string computePD(const std::vector<std::vector<int> >& pd) {
     flushCobCache();
     g_smallArena.reset();
     std::vector<int> signs = getSigns(pd);
-    PDCode working = g_options.simplifyPD ? simplifyPDCode(pd, &signs) : pd;
+    PDCode working = simplifyPDCode(pd, &signs, g_options.simplifyR1, g_options.simplifyNugatory);
     Komplex k = generateFast(working, signs);
     ProfileScope khScope(g_profile.kh);
     return k.KhForZ();
@@ -3436,7 +3442,8 @@ static std::string formatCrossingSigns(const PDCode& pd) {
 }
 
 static std::string simplifiedPDString(const PDCode& pd) {
-    PDCode working = g_options.simplifyPD ? simplifyPDCode(pd) : pd;
+    getSigns(pd);
+    PDCode working = simplifyPDCode(pd, nullptr, g_options.simplifyR1, g_options.simplifyNugatory);
     return formatPDCode(working);
 }
 
@@ -3490,7 +3497,8 @@ CPPKH_API char* cppkh_compute_pd_ex(const char* pd_code, int simplify_pd, int re
         CppkhOptionsGuard guard;
         kh::g_options.progress = false;
         kh::g_options.profile = false;
-        kh::g_options.simplifyPD = simplify_pd != 0;
+        kh::g_options.simplifyR1 = simplify_pd != 0;
+        kh::g_options.simplifyNugatory = simplify_pd != 0;
         kh::g_options.reorderCrossings = reorder_crossings != 0;
         std::string result = kh::computePD(parsed[0].second);
         return cppkhDuplicateString(result);
@@ -3517,7 +3525,8 @@ CPPKH_API char* cppkh_compute_pd_batch_ex(const char* pd_codes, int simplify_pd,
         CppkhOptionsGuard guard;
         kh::g_options.progress = false;
         kh::g_options.profile = false;
-        kh::g_options.simplifyPD = simplify_pd != 0;
+        kh::g_options.simplifyR1 = simplify_pd != 0;
+        kh::g_options.simplifyNugatory = simplify_pd != 0;
         kh::g_options.reorderCrossings = reorder_crossings != 0;
 
         std::ostringstream out;
@@ -3547,7 +3556,8 @@ CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
         if (parsed.empty()) throw std::runtime_error("no PD code found");
         if (parsed.size() != 1) throw std::runtime_error("cppkh_simplify_pd expects exactly one PD code");
         CppkhOptionsGuard guard;
-        kh::g_options.simplifyPD = true;
+        kh::g_options.simplifyR1 = true;
+        kh::g_options.simplifyNugatory = true;
         std::string result = kh::simplifiedPDString(parsed[0].second);
         return cppkhDuplicateString(result);
     } catch (const std::exception& e) {
@@ -3562,7 +3572,7 @@ CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
 
 #ifndef CPPKH_SHARED_LIBRARY
 static void usage() {
-    std::cout << "Usage: cppkh [--pd-file FILE] [--pd-dir DIR] [--pd-code CODE] [--ordered] [--threads N|auto] [--quiet] [--profile] [--no-simplify-pd] [--print-simplified-pd] [--print-crossing-signs]\n";
+    std::cout << "Usage: cppkh [--pd-file FILE] [--pd-dir DIR] [--pd-code CODE] [--ordered] [--threads N|auto] [--quiet] [--profile] [--no-simplify-pd] [--simplify-r1|--no-simplify-r1] [--simplify-nugatory|--no-simplify-nugatory] [--print-simplified-pd] [--print-crossing-signs]\n";
     std::cout << "Thread backend: " << KH_THREAD_BACKEND_NAME << "\n";
     std::cout << "Detected CPU threads: " << kh::detectHardwareThreads() << "\n";
     std::cout << "PD simplification: R1 removal then nugatory crossing removal is enabled by default.\n";
@@ -3591,8 +3601,16 @@ int main(int argc, char** argv) {
             } else if (a == "--ordered" || a == "-O") kh::g_options.reorderCrossings = false;
             else if (a == "--quiet" || a == "-q") kh::g_options.progress = false;
             else if (a == "--profile") kh::g_options.profile = true;
-            else if (a == "--no-simplify-pd" || a == "--raw-pd") kh::g_options.simplifyPD = false;
-            else if (a == "--simplify-pd") kh::g_options.simplifyPD = true;
+            else if (a == "--no-simplify-pd" || a == "--raw-pd") {
+                kh::g_options.simplifyR1 = false;
+                kh::g_options.simplifyNugatory = false;
+            } else if (a == "--simplify-pd") {
+                kh::g_options.simplifyR1 = true;
+                kh::g_options.simplifyNugatory = true;
+            } else if (a == "--no-simplify-r1") kh::g_options.simplifyR1 = false;
+            else if (a == "--simplify-r1") kh::g_options.simplifyR1 = true;
+            else if (a == "--no-simplify-nugatory") kh::g_options.simplifyNugatory = false;
+            else if (a == "--simplify-nugatory") kh::g_options.simplifyNugatory = true;
             else if (a == "--print-simplified-pd") printSimplifiedPD = true;
             else if (a == "--print-crossing-signs") printCrossingSigns = true;
             else if (a == "--threads" || a == "-j") {

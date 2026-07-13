@@ -44,6 +44,10 @@ benchmark helper.
 --simplify-pd           Enable PD simplification (default).
 --no-simplify-pd        Disable default PD simplification.
 --raw-pd                Alias for --no-simplify-pd.
+--simplify-r1           Enable R1 removal independently.
+--no-simplify-r1        Disable R1 removal independently.
+--simplify-nugatory     Enable nugatory-crossing removal independently.
+--no-simplify-nugatory  Disable nugatory-crossing removal independently.
 --print-simplified-pd   Print the simplified PD code instead of homology.
 --print-crossing-signs  Print SageMath-compatible crossing signs instead of homology.
 --help, -h              Show CLI help.
@@ -62,6 +66,10 @@ Use `--no-simplify-pd` only when the input has already been simplified outside
 `cppkh`. For JavaKh comparisons, the benchmark script can run the external
 Python simplifiers first and then pass `--no-simplify-pd` to `cppkh`, ensuring
 both programs receive the same simplified PD code.
+
+The independent switches are used by `cppkh-interface` for all four
+`de_r1`/`de_k8` combinations. Nugatory removal includes its required initial
+R1 cleanup, matching the historical `pd-code-delete-nugatory` behavior.
 
 Crossing signs are resolved from directed edge incidences before simplification
 and remain attached to surviving crossings. They do not depend on arc-label

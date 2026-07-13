@@ -18,13 +18,13 @@ wheel and sdist archives include the C++ source file:
 cppkh_interface/data/src/main.cpp
 ```
 
-On first use, `cppkh-interface` calls `cpp-simple-interface` to compile that
-source into a local executable. The executable is cached and reused by later
-calls.
+On first use, `cppkh-interface` uses Python's standard library to invoke a
+local C++14 compiler. The executable is cached and reused by later calls. The
+installed package has no runtime Python-package dependencies.
 
 The repository checkout does not keep that data-file copy under version
-control. During `poetry build` or `poetry publish --build`, a custom PEP 517
-backend copies the canonical source from:
+control. During a PEP 517 build, a custom backend copies the canonical source
+from:
 
 ```text
 src/main.cpp
@@ -37,25 +37,26 @@ temporary copy. Editable/development runs fall back to the repository-root
 ## Requirements
 
 - Python 3.10 or newer.
-- A `g++` compatible compiler available at runtime.
-- Poetry for build and publish commands.
+- A C++14 compiler available at runtime.
+- The `build` frontend and Poetry are needed only by package maintainers.
 
-The compiler is selected by `cpp-simple-interface` in this order:
+The compiler is selected in this order:
 
-1. `CXX` environment variable.
-2. The compiler set by `cpp_simple_interface.set_gpp_filepath(...)`.
-3. `g++` on `PATH`.
+1. A command passed to `compile_cppkh(cxx=...)` for the current process.
+2. `CPPKH_INTERFACE_CXX` environment variable.
+3. `CXX` environment variable.
+4. `g++`, `clang++`, or `c++` on `PATH`.
 
 Windows PowerShell example:
 
 ```powershell
-$env:CXX = "C:\path\to\g++.exe"
+$env:CPPKH_INTERFACE_CXX = "C:\path\to\g++.exe"
 ```
 
 Linux / macOS example:
 
 ```sh
-export CXX=clang++
+export CPPKH_INTERFACE_CXX=clang++
 ```
 
 Benchmark scripts in this repository may choose a faster 64-bit compiler for
@@ -64,12 +65,11 @@ Python package.
 
 ## Build
 
-Use the Poetry installed in your Conda base environment, or any Poetry 2.x
-installation:
+Use a PEP 517 frontend so the custom backend embeds the canonical C++ source:
 
 ```sh
 cd python_project/cppkh-interface
-poetry build
+python -m build
 ```
 
 This creates source and wheel distributions under:
@@ -87,11 +87,10 @@ cd python_project/cppkh-interface
 poetry publish
 ```
 
-Or build and publish in one step:
-
-```sh
-poetry publish --build
-```
+Do not use `poetry build` or `poetry publish --build`; those commands bypass
+the custom PEP 517 backend and omit `src/main.cpp`. Always run
+`python -m build`, validate the resulting wheel, and then publish the existing
+artifacts with `poetry publish`.
 
 ## Install
 
@@ -141,12 +140,11 @@ The arguments match the `javakh-interface` behavior:
 - `de_k8`: remove nugatory crossings after R1 removal.
 - `show_real_pdcode`: print the simplified PD code before computing.
 
-With the default `de_r1=True` and `de_k8=True`, the raw PD code is passed to the
-compiled C++ backend and cppkh performs R1 removal followed by nugatory-crossing
-removal. With both values set to `False`, the raw input is computed without
-those simplifications. Mixed values are still supported for single-code calls
-through Python preprocessing, matching the compatibility behavior of
-`javakh-interface`.
+All four `de_r1`/`de_k8` combinations are passed directly to the compiled C++
+backend. With both values `True`, cppkh performs R1 removal followed by
+nugatory-crossing removal. With both values `False`, it computes the raw input.
+Nugatory-only mode includes the R1 cleanup required by that algorithm, matching
+the historical `pd-code-delete-nugatory` behavior.
 
 Crossing signs use the same directed-edge traversal as SageMath and the bundled
 JavaKh patch. Because the package compiles the repository's `src/main.cpp`, no
@@ -174,11 +172,9 @@ results = cppkh_interface.solve_many_khovanov(
 ```
 
 The batch functions accept either a newline-separated PD document string or a
-sequence containing supported single PD-code inputs. For the high-throughput
-path, `de_r1` and `de_k8` must be equal: both `True` means the C++ backend does
-R1 then nugatory simplification; both `False` means no simplification. Mixed
-batch settings are rejected instead of silently falling back to slow per-item
-Python preprocessing.
+sequence containing supported single PD-code inputs. All four `de_r1`/`de_k8`
+combinations stay on the same high-throughput C++ batch path; no Python-side PD
+simplifier is involved.
 
 ## Additional API
 
@@ -209,6 +205,11 @@ Override this location with:
 ```sh
 export CPPKH_INTERFACE_CACHE_DIR=/path/to/cache
 ```
+
+The cache key includes the C++ source, compiler identity, flags, and platform.
+Each process compiles to its own temporary file and atomically publishes the
+immutable executable, so concurrent processes do not share a global lock or a
+mutable computation cache.
 
 By default, compilation uses:
 

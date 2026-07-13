@@ -3,9 +3,9 @@
 `cppkh-interface` is a Python package for computing integer Khovanov homology
 with the C++ `cppkh` implementation.
 
-Version `0.1.2` resolves link crossing signs by tracing directed PD edge
-incidences with the SageMath convention. It does not infer signs from numeric
-arc-label ordering.
+Version `0.1.3` has no runtime Python-package dependencies. Link crossing signs,
+PD validation, R1 removal, and nugatory-crossing removal all use the bundled
+canonical `cppkh` C++ source and its SageMath-compatible orientation rules.
 
 The package is compatible with the main `javakh-interface` function:
 
@@ -19,13 +19,13 @@ print(cppkh_interface.solve_many_khovanov([pd_code, pd_code]))
 
 Unlike wrappers that ship a prebuilt DLL or shared object, this package ships
 the `cppkh` C++ source file in built distributions and compiles a local
-executable on first use through `cpp-simple-interface`. The compiled executable
-is cached for later calls.
+executable on first use using only Python's standard library. The compiled
+executable is cached for later calls.
 
 In the repository checkout, the package does not keep a committed backup copy
 of the C++ source. The build backend copies `../../src/main.cpp` into the
-package data directory only while `poetry build` or `poetry publish --build` is
-running, then removes that temporary copy.
+package data directory only while the PEP 517 build is running, then removes
+that temporary copy.
 
 ## Install
 
@@ -33,17 +33,18 @@ running, then removes that temporary copy.
 pip install cppkh-interface
 ```
 
-A `g++` compatible compiler must be available at runtime. To select a compiler,
-set `CXX` before importing or calling the package:
+A C++14 compiler must be available at runtime. The package looks at
+`CPPKH_INTERFACE_CXX`, then `CXX`, then searches `PATH` for `g++`, `clang++`, or
+`c++`. To select a compiler explicitly:
 
 ```sh
-CXX=clang++ python your_script.py
+CPPKH_INTERFACE_CXX=clang++ python your_script.py
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:CXX = "C:\path\to\g++.exe"
+$env:CPPKH_INTERFACE_CXX = "C:\path\to\g++.exe"
 python your_script.py
 ```
 
@@ -52,11 +53,13 @@ python your_script.py
 From this directory:
 
 ```sh
-poetry build
+python -m build
 poetry publish
 ```
 
-Use `poetry publish --build` to build and upload in one command.
+Do not use `poetry build` or `poetry publish --build`: Poetry's direct builder
+bypasses the source-synchronizing PEP 517 backend. Build first with
+`python -m build`, inspect/test the wheel, then publish the existing artifacts.
 
 For local testing:
 
