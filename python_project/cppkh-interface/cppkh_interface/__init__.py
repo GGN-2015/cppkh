@@ -1,6 +1,8 @@
 from .main import (
     CppkhInterfaceError,
     compile_cppkh,
+    compile_cppkh_shared,
+    compute_signed_variants,
     compute_many_pd,
     compute_pd,
     get_cppkh_executable,
@@ -14,6 +16,8 @@ from .main import (
 __all__ = [
     "CppkhInterfaceError",
     "compile_cppkh",
+    "compile_cppkh_shared",
+    "compute_signed_variants",
     "compute_many_pd",
     "compute_pd",
     "get_cppkh_executable",

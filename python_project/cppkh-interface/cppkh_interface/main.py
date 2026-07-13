@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import ctypes
 import hashlib
 import os
 import pathlib
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import threading
 from importlib import resources
 from typing import Optional, Sequence, Union
 
@@ -70,6 +72,15 @@ def _as_crossings(pd_code: PdInput) -> list[list[int]]:
             raise ValueError(f"PD crossing must have four entries: {crossing!r}")
         crossings.append([int(item) for item in values])
     return crossings
+
+
+def _check_sanity(crossings: list[list[int]]) -> None:
+    counts = {}
+    for crossing in crossings:
+        for label in crossing:
+            counts[label] = counts.get(label, 0) + 1
+    if any(count != 2 for count in counts.values()):
+        raise TypeError("each PD label must occur exactly twice")
 
 
 def normalize_pd_code(pd_code: PdInput) -> str:
@@ -140,6 +151,10 @@ def _default_compile_flags() -> list[str]:
 
 def _exe_suffix() -> str:
     return ".exe" if platform.system() == "Windows" else ""
+
+
+def _shared_suffix() -> str:
+    return ".dll" if platform.system() == "Windows" else (".dylib" if platform.system() == "Darwin" else ".so")
 
 
 def _compiler_parts(command: str) -> list[str]:
@@ -305,6 +320,79 @@ def compile_cppkh(
                 tmp_exe.unlink()
             except OSError:
                 pass
+
+
+def compile_cppkh_shared(*, force: bool = False) -> pathlib.Path:
+    """Compile and cache the cppkh C API shared library."""
+    with _resource_source_path() as source:
+        source_path = pathlib.Path(source)
+        compiler = _resolve_compiler()
+        flags = _default_compile_flags() + ["-shared", "-DCPPKH_SHARED_LIBRARY"]
+        cache = _cache_dir()
+        library = cache / f"cppkh-{_cache_key(source_path.read_bytes(), flags, compiler)}{_shared_suffix()}"
+        if library.exists() and not force:
+            return library
+        temporary = cache / f"{library.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}{_shared_suffix()}"
+        try:
+            result = _compile_source(compiler, source_path, temporary, flags)
+            if result.returncode != 0 and "-march=native" in flags:
+                result = _compile_source(compiler, source_path, temporary, [flag for flag in flags if flag != "-march=native"])
+            if result.returncode != 0:
+                raise CppkhInterfaceError((result.stderr or result.stdout or "C++ shared compilation failed").strip())
+            os.replace(temporary, library)
+            return library
+        finally:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
+_shared_lock = threading.Lock()
+_shared_library = None
+_dll_directory_handles = []
+
+
+def _load_shared_library():
+    global _shared_library
+    if _shared_library is not None:
+        return _shared_library
+    runtime_paths = _compiler_runtime_path_entries(_resolve_compiler())
+    if runtime_paths:
+        os.environ["PATH"] = os.pathsep.join(runtime_paths + [os.environ.get("PATH", "")])
+    library_path = compile_cppkh_shared()
+    if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
+        for directory in [str(library_path.parent), *runtime_paths]:
+            _dll_directory_handles.append(os.add_dll_directory(directory))
+    library = ctypes.CDLL(str(library_path))
+    library.cppkh_compute_pd_signed_variants_ex.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+    library.cppkh_compute_pd_signed_variants_ex.restype = ctypes.c_void_p
+    library.cppkh_last_error.restype = ctypes.c_char_p
+    library.cppkh_free.argtypes = [ctypes.c_void_p]
+    _shared_library = library
+    return library
+
+
+def compute_signed_variants(pd_code: PdInput, signs: Sequence[Sequence[int]]) -> list[str]:
+    """Compute several explicit crossing-sign variants in one native call."""
+    crossings = _as_crossings(pd_code)
+    _check_sanity(crossings)
+    rows = [list(row) for row in signs]
+    if any(len(row) != len(crossings) or any(sign not in (-1, 1) for sign in row) for row in rows):
+        raise ValueError("each sign row must contain one +1/-1 value per crossing")
+    pd_text = _format_pd(crossings).encode("utf-8")
+    signs_text = "\n".join(" ".join(map(str, row)) for row in rows).encode("ascii")
+    with _shared_lock:
+        library = _load_shared_library()
+        pointer = library.cppkh_compute_pd_signed_variants_ex(pd_text, signs_text, 1)
+        if not pointer:
+            error = library.cppkh_last_error()
+            raise CppkhInterfaceError(error.decode("utf-8", "replace") if error else "signed computation failed")
+        try:
+            result = ctypes.string_at(pointer).decode("utf-8")
+        finally:
+            library.cppkh_free(pointer)
+    return result.splitlines()
 
 
 def get_cppkh_executable() -> pathlib.Path:

@@ -1,6 +1,6 @@
 [project]
 name = "cppkh-interface"
-version = "0.1.3"
+version = "0.2.0"
 description = "Dependency-free Python interface for cppkh with runtime C++ compilation."
 authors = [
     {name = "GGN_2015", email = "neko@jlulug.org"}

@@ -3413,6 +3413,72 @@ static std::string computePD(const std::vector<std::vector<int> >& pd) {
     return k.KhForZ();
 }
 
+static std::string computePDWithSigns(const std::vector<std::vector<int> >& pd,
+                                      const std::vector<int>& xsigns) {
+    if (xsigns.size() != pd.size()) throw std::runtime_error("sign count does not match PD crossing count");
+    for (int sign : xsigns) {
+        if (sign != 1 && sign != -1) throw std::runtime_error("crossing signs must be +1 or -1");
+    }
+    flushCobCache();
+    g_smallArena.reset();
+    Komplex k = generateFast(pd, xsigns);
+    ProfileScope khScope(g_profile.kh);
+    return k.KhForZ();
+}
+
+static std::string trimAscii(const std::string& s) {
+    size_t first = 0;
+    while (first < s.size() && std::isspace(static_cast<unsigned char>(s[first]))) ++first;
+    size_t last = s.size();
+    while (last > first && std::isspace(static_cast<unsigned char>(s[last - 1]))) --last;
+    return s.substr(first, last - first);
+}
+
+static std::vector<int> parseSignsLine(const std::string& line) {
+    std::vector<int> signs;
+    size_t pos = 0;
+    while (pos < line.size()) {
+        char ch = line[pos];
+        if (std::isspace(static_cast<unsigned char>(ch)) || ch == ',' ||
+            ch == '[' || ch == ']' || ch == '(' || ch == ')' || ch == ';') {
+            ++pos;
+            continue;
+        }
+        int sign = 1;
+        bool sawExplicitSign = false;
+        if (ch == '+' || ch == '-') {
+            sign = (ch == '-') ? -1 : 1;
+            sawExplicitSign = true;
+            ++pos;
+        }
+        int value = 0;
+        bool sawDigit = false;
+        while (pos < line.size() && std::isdigit(static_cast<unsigned char>(line[pos]))) {
+            sawDigit = true;
+            value = value * 10 + (line[pos++] - '0');
+        }
+        if (!sawExplicitSign && !sawDigit) throw std::runtime_error("invalid crossing sign token");
+        if (sawDigit && value != 1) throw std::runtime_error("crossing signs must be +1 or -1");
+        signs.push_back(sign);
+    }
+    return signs;
+}
+
+static std::vector<std::vector<int> > parseSignsDocument(const std::string& text) {
+    std::vector<std::vector<int> > result;
+    if (trimAscii(text).empty()) {
+        result.push_back(std::vector<int>());
+        return result;
+    }
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!trimAscii(line).empty()) result.push_back(parseSignsLine(line));
+    }
+    if (result.empty()) result.push_back(std::vector<int>());
+    return result;
+}
+
 static std::string formatPDCode(const PDCode& pd) {
     std::ostringstream out;
     out << "PD[";
@@ -3546,6 +3612,40 @@ CPPKH_API char* cppkh_compute_pd_batch_ex(const char* pd_codes, int simplify_pd,
 
 CPPKH_API char* cppkh_compute_pd_batch(const char* pd_codes) {
     return cppkh_compute_pd_batch_ex(pd_codes, 1, 1);
+}
+
+CPPKH_API char* cppkh_compute_pd_signed_variants_ex(const char* pd_code,
+                                                     const char* signs_text,
+                                                     int reorder_crossings) {
+    try {
+        g_cppkhLastError.clear();
+        if (!pd_code) throw std::runtime_error("pd_code is null");
+        if (!signs_text) throw std::runtime_error("signs_text is null");
+        std::vector<std::pair<std::string, kh::PDCode> > parsed =
+            kh::parsePDDocument(pd_code, "ctypes-signed");
+        if (parsed.size() != 1) {
+            throw std::runtime_error("signed variants expect exactly one PD code");
+        }
+        std::vector<std::vector<int> > signs = kh::parseSignsDocument(signs_text);
+        CppkhOptionsGuard guard;
+        kh::g_options.progress = false;
+        kh::g_options.profile = false;
+        kh::g_options.simplifyR1 = false;
+        kh::g_options.simplifyNugatory = false;
+        kh::g_options.reorderCrossings = reorder_crossings != 0;
+        std::ostringstream out;
+        for (size_t i = 0; i < signs.size(); ++i) {
+            if (i) out << "\n";
+            out << kh::computePDWithSigns(parsed[0].second, signs[i]);
+        }
+        return cppkhDuplicateString(out.str());
+    } catch (const std::exception& e) {
+        g_cppkhLastError = e.what();
+        return nullptr;
+    } catch (...) {
+        g_cppkhLastError = "unknown error";
+        return nullptr;
+    }
 }
 
 CPPKH_API char* cppkh_simplify_pd(const char* pd_code) {
