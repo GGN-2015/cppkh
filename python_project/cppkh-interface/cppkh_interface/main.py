@@ -374,10 +374,16 @@ def _load_shared_library():
 
 
 def compute_signed_variants(pd_code: PdInput, signs: Sequence[Sequence[int]]) -> list[str]:
-    """Compute several explicit crossing-sign variants in one native call."""
+    """Compute explicit crossing-sign variants in one native call.
+
+    This additive API does not simplify the PD code because every sign row
+    corresponds positionally to the original crossing list.
+    """
     crossings = _as_crossings(pd_code)
     _check_sanity(crossings)
     rows = [list(row) for row in signs]
+    if not rows:
+        raise ValueError("at least one crossing-sign row is required")
     if any(len(row) != len(crossings) or any(sign not in (-1, 1) for sign in row) for row in rows):
         raise ValueError("each sign row must contain one +1/-1 value per crossing")
     pd_text = _format_pd(crossings).encode("utf-8")

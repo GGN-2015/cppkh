@@ -3,7 +3,7 @@
 `cppkh-interface` is a Python package for computing integer Khovanov homology
 with the C++ `cppkh` implementation.
 
-Version `0.1.3` has no runtime Python-package dependencies. Link crossing signs,
+The package has no runtime Python-package dependencies. Link crossing signs,
 PD validation, R1 removal, and nugatory-crossing removal all use the bundled
 canonical `cppkh` C++ source and its SageMath-compatible orientation rules.
 
@@ -16,6 +16,23 @@ pd_code = [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]
 print(cppkh_interface.solve_khovanov(pd_code, de_r1=True, de_k8=True))
 print(cppkh_interface.solve_many_khovanov([pd_code, pd_code]))
 ```
+
+For a multi-component oriented link, callers can compute several explicit
+crossing-sign variants without changing the existing APIs:
+
+```python
+from cppkh_interface import compute_signed_variants
+
+hopf = [[2, 3, 1, 4], [4, 1, 3, 2]]
+results = compute_signed_variants(hopf, [[-1, -1], [1, 1]])
+assert len(results) == 2
+```
+
+Each sign row must contain exactly one `-1` or `1` for every crossing. This
+operation deliberately disables PD simplification because removing a crossing
+would invalidate the positional sign mapping. `solve_khovanov` and
+`solve_many_khovanov` retain their original signatures, inferred-sign behavior,
+and simplification defaults.
 
 Unlike wrappers that ship a prebuilt DLL or shared object, this package ships
 the `cppkh` C++ source file in built distributions and compiles a local
