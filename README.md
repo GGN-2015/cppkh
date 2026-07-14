@@ -88,6 +88,25 @@ copied beside it.
 - [Bundled JavaKh reference](docs/JAVAKH_REFERENCE.md)
 - [Benchmark results](docs/BENCHMARKS.md)
 
+## Tests
+
+Run the orientation and JavaKh comparison suite:
+
+```sh
+python tools/test_pd_orientation.py
+```
+
+Run the dependency-free Python interface regression directly from a fresh
+checkout. The script adds the included `python_project/cppkh-interface` source
+tree itself, so installing the package first is not required:
+
+```sh
+python tools/test_cppkh_interface_standalone.py --force-compile
+```
+
+See [Testing against JavaKh](docs/TEST.md) for the full consistency datasets,
+tool requirements, and benchmark-oriented tests.
+
 ## References
 
 - Knot Atlas: [Planar Diagrams](https://katlas.org/wiki/Planar_Diagrams)
@@ -107,7 +126,7 @@ If you use `cppkh` in academic work, please cite this repository:
   author  = {{GGN\_2015}},
   title   = {{cppkh}: A C++ implementation of the JavaKh Khovanov homology computation path},
   year    = {2026},
-  url     = {https://github.com/GGN-2015/cppkh},
+  url     = {https://github.com/TopologicalKnotIndexer/cppkh},
   version = {0.1.3}
 }
 ```

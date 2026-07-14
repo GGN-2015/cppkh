@@ -6,6 +6,12 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL_PACKAGE_ROOT = ROOT / "python_project" / "cppkh-interface"
+sys.path.insert(0, str(LOCAL_PACKAGE_ROOT))
 
 
 TREFOIL = [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]
