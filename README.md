@@ -123,7 +123,7 @@ If you use `cppkh` in academic work, please cite this repository:
 
 ```bibtex
 @software{cppkh_2026,
-  author  = {{GGN\_2015}},
+  author = {{GGN\_2015}},
   title   = {{cppkh}: A C++ implementation of the JavaKh Khovanov homology computation path},
   year    = {2026},
   url     = {https://github.com/TopologicalKnotIndexer/cppkh},
